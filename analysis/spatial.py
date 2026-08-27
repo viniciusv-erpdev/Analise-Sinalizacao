@@ -5,130 +5,156 @@ from sklearn.cluster import DBSCAN
 
 
 EARTH_RADIUS_METERS = 6_371_000
-CLUSTER_RADIUS_METERS = 20
 
 
-def cluster_accidents(
-    df: pd.DataFrame,
-    radius_meters: float = CLUSTER_RADIUS_METERS,
+def cluster_points(
+    points: pd.DataFrame,
+    radius_meters: float = 20,
+    min_samples: int = 1,
 ) -> pd.DataFrame:
+    """
+    Agrupa pontos geográficos próximos utilizando DBSCAN.
 
-    coordinates = df[
-        ["latitude", "longitude"]
-    ].to_numpy(dtype="float64")
+    Parameters
+    ----------
+    points:
+        DataFrame contendo as colunas latitude e longitude.
 
-    coordinates_radians = np.radians(coordinates)
+    radius_meters:
+        Distância máxima entre pontos para pertencerem
+        ao mesmo agrupamento.
 
-    epsilon = radius_meters / EARTH_RADIUS_METERS
+    min_samples:
+        Quantidade mínima de pontos para formar um agrupamento.
+
+    Returns
+    -------
+    DataFrame
+        Cópia dos pontos contendo a coluna cluster_id.
+    """
+
+    required_columns = {
+        "latitude",
+        "longitude",
+    }
+
+    missing = required_columns - set(points.columns)
+
+    if missing:
+        raise ValueError(
+            f"Colunas obrigatórias ausentes: {missing}"
+        )
+
+    if points.empty:
+        result = points.copy()
+        result["cluster_id"] = pd.Series(
+            dtype="int64"
+        )
+        return result
+
+    result = points.copy()
+
+    coordinates = (
+        result[
+            ["latitude", "longitude"]
+        ]
+        .astype("float64")
+        .to_numpy()
+    )
+
+    coordinates_radians = np.radians(
+        coordinates
+    )
+
+    epsilon = (
+        radius_meters
+        / EARTH_RADIUS_METERS
+    )
 
     model = DBSCAN(
         eps=epsilon,
-        min_samples=1,
+        min_samples=min_samples,
         metric="haversine",
-        algorithm="ball_tree",
     )
 
-    labels = model.fit_predict(coordinates_radians)
-
-    result = df.copy()
+    labels = model.fit_predict(
+        coordinates_radians
+    )
 
     result["cluster_id"] = labels
 
     return result
 
-def summarize_clusters(
-    clustered: pd.DataFrame,
+def assign_clusters_to_accidents(
+    accidents: pd.DataFrame,
+    clustered_points: pd.DataFrame,
 ) -> pd.DataFrame:
+    """
+    Associa cada acidente ao cluster correspondente.
 
-    summary = (
-        clustered
-        .groupby("cluster_id")
-        .agg(
-            latitude=("latitude", "mean"),
-            longitude=("longitude", "mean"),
-            accident_count=("id", "count"),
-        )
-        .reset_index()
+    A associação é feita através das coordenadas
+    latitude e longitude.
+    """
+
+    required_accident_columns = {
+        "latitude",
+        "longitude",
+    }
+
+    required_point_columns = {
+        "latitude",
+        "longitude",
+        "cluster_id",
+    }
+
+    missing_accidents = (
+        required_accident_columns
+        - set(accidents.columns)
     )
 
-    return summary
-
-def summarize_clusters(
-    clustered: pd.DataFrame,
-) -> pd.DataFrame:
-
-    summary = (
-        clustered
-        .groupby("cluster_id")
-        .agg(
-            latitude=("latitude", "mean"),
-            longitude=("longitude", "mean"),
-            accident_count=("id", "count"),
-            collisions=(
-                "accident_type",
-                lambda x: (x == "COLISAO").sum(),
-            ),
-            pedestrians=(
-                "accident_type",
-                lambda x: (x == "ATROPELAMENTO").sum(),
-            ),
-        )
-        .reset_index()
+    missing_points = (
+        required_point_columns
+        - set(clustered_points.columns)
     )
 
-    return summary
-
-def summarize_clusters(
-    clustered: pd.DataFrame,
-) -> pd.DataFrame:
-
-    summary = (
-        clustered
-        .groupby("cluster_id")
-        .agg(
-            latitude=("latitude", "mean"),
-            longitude=("longitude", "mean"),
-            accident_count=("id", "count"),
-            collisions=(
-                "accident_type",
-                lambda x: (x == "COLISAO").sum(),
-            ),
-            pedestrians=(
-                "accident_type",
-                lambda x: (x == "ATROPELAMENTO").sum(),
-            ),
+    if missing_accidents:
+        raise ValueError(
+            f"Colunas obrigatórias ausentes em accidents: "
+            f"{missing_accidents}"
         )
-        .reset_index()
+
+    if missing_points:
+        raise ValueError(
+            f"Colunas obrigatórias ausentes em clustered_points: "
+            f"{missing_points}"
+        )
+
+    result = accidents.copy()
+
+    cluster_mapping = (
+        clustered_points[
+            [
+                "latitude",
+                "longitude",
+                "cluster_id",
+            ]
+        ]
+        .drop_duplicates(
+            subset=[
+                "latitude",
+                "longitude",
+            ]
+        )
     )
 
-    return summary
-
-def group_by_coordinates(
-    df: pd.DataFrame,
-) -> pd.DataFrame:
-
-    valid = df[
-        df["latitude"].notna()
-        & df["longitude"].notna()
-    ]
-
-    points = (
-        valid
-        .groupby(
-            ["latitude", "longitude"],
-        )
-        .agg(
-            accident_count=("id", "count"),
-            collisions=(
-                "accident_type",
-                lambda x: (x == "COLISAO").sum(),
-            ),
-            pedestrians=(
-                "accident_type",
-                lambda x: (x == "ATROPELAMENTO").sum(),
-            ),
-        )
-        .reset_index()
+    result = result.merge(
+        cluster_mapping,
+        on=[
+            "latitude",
+            "longitude",
+        ],
+        how="left",
+        validate="many_to_one",
     )
 
-    return points
+    return result

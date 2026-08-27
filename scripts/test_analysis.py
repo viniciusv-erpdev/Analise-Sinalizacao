@@ -3,306 +3,460 @@ from pathlib import Path
 
 from accidents.normalizer import normalize, validate
 
-from analysis.spatial import (
-    cluster_accidents,
-    summarize_clusters,
+from analysis.geography import (
+    load_municipality,
+    validate_coordinates,
 )
+
+from analysis.spatial import (
+    cluster_points,
+    assign_clusters_to_accidents,
+)
+
+
+# ============================================================
+# CONFIGURAÇÃO
+# ============================================================
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-path = BASE_DIR / "data" / "raw" / "sinistros_2025-2026.csv"
+INPUT_PATH = (
+    BASE_DIR
+    / "data"
+    / "raw"
+    / "sinistros_2025-2026.csv"
+)
+
+MUNICIPALITY_PATH = (
+    BASE_DIR
+    / "data"
+    / "geography"
+    / "ribeirao-preto"
+    / "municipio.json"
+)
 
 
-# =========================
-# CARREGAMENTO
-# =========================
+# ============================================================
+# LEITURA DOS DADOS
+# ============================================================
 
 try:
     df = pd.read_csv(
-        path,
+        INPUT_PATH,
         sep=";",
-        encoding="utf-8"
+        encoding="utf-8",
     )
+
 except UnicodeDecodeError:
     df = pd.read_csv(
-        path,
+        INPUT_PATH,
         sep=";",
-        encoding="latin-1"
+        encoding="latin-1",
     )
 
 
-# =========================
+print("=== DADOS ORIGINAIS ===")
+print("Total:", len(df))
+
+
+# ============================================================
 # NORMALIZAÇÃO
-# =========================
+# ============================================================
 
 normalized = normalize(df)
 
 validate(normalized)
 
 
-# =========================
-# MUNICÍPIOS
-# =========================
+print()
+print("=== DADOS NORMALIZADOS ===")
+print("Total:", len(normalized))
 
-print("=== CIDADES ===")
-
-print(
-    normalized["city"]
-    .value_counts()
-    .head(20)
-)
+print()
+print("Colunas:")
+print(normalized.columns.tolist())
 
 
-# =========================
-# FILTRO ESPACIAL
-# =========================
+# ============================================================
+# RIBEIRÃO PRETO
+# ============================================================
 
 ribeirao = normalized[
-    (normalized["city"] == "RIBEIRAO PRETO")
-    & normalized["latitude"].notna()
-    & normalized["longitude"].notna()
+    normalized["city"] == "RIBEIRAO PRETO"
 ].copy()
 
 
-print("\n=== RIBEIRÃO PRETO ===")
+print()
+print("=== RIBEIRÃO PRETO ===")
+print("Registros:", len(ribeirao))
 
-print("Total de registros:", len(ribeirao))
 
+# ============================================================
+# CARREGAMENTO DO MUNICÍPIO
+# ============================================================
 
-# =========================
-# DBSCAN
-# =========================
-
-print("\n=== TIPOS DAS COORDENADAS ===")
-
-print(ribeirao[["latitude", "longitude"]].dtypes)
-
-print("\nDtype do NumPy:")
-
-print(
-    ribeirao[
-        ["latitude", "longitude"]
-    ].to_numpy().dtype
+municipality = load_municipality(
+    MUNICIPALITY_PATH
 )
 
-clustered = cluster_accidents(
+
+print()
+print("=== MUNICÍPIO ===")
+print("CRS:", municipality.crs)
+print("Bounds:", municipality.total_bounds)
+
+
+# ============================================================
+# VALIDAÇÃO DAS COORDENADAS
+# ============================================================
+
+ribeirao = validate_coordinates(
     ribeirao,
-    radius_meters=20,
+    municipality,
 )
 
 
-print("\n=== CLUSTERS ===")
+print()
+print("=== STATUS DAS COORDENADAS ===")
 
 print(
-    clustered["cluster_id"]
+    ribeirao["coordinate_status"]
     .value_counts()
-    .head(20)
 )
 
-print("\n=== RESULTADO DBSCAN ===")
+
+# ============================================================
+# COORDENADAS VÁLIDAS
+# ============================================================
+
+valid_coordinates = ribeirao[
+    ribeirao["coordinate_status"] == "VALID"
+].copy()
+
+
+print()
+print("=== COORDENADAS VÁLIDAS ===")
+print("Total:", len(valid_coordinates))
+
+
+# ============================================================
+# PONTOS DE OCORRÊNCIA
+# ============================================================
+
+points = (
+    valid_coordinates
+    .groupby(
+        ["latitude", "longitude"],
+        dropna=False,
+    )
+    .agg(
+        accident_count=("id", "count"),
+
+        collisions=(
+            "accident_type",
+            lambda x: (
+                x == "COLISAO"
+            ).sum(),
+        ),
+
+        pedestrians=(
+            "accident_type",
+            lambda x: (
+                x == "ATROPELAMENTO"
+            ).sum(),
+        ),
+    )
+    .reset_index()
+)
+
+
+print()
+print("=== PONTOS DE OCORRÊNCIA ===")
+print("Total:", len(points))
+
+
+print()
+print("=== MAIORES PONTOS ===")
 
 print(
-    "Quantidade de registros:",
-    len(clustered)
+    points
+    .sort_values(
+        "accident_count",
+        ascending=False,
+    )
+    .head(30)
+    .to_string(index=False)
 )
+
+
+# ============================================================
+# CLUSTERIZAÇÃO
+# ============================================================
+
+clusters = cluster_points(
+    points,
+    radius_meters=20,
+    min_samples=1,
+)
+
+
+print()
+print("=== CLUSTERS ===")
 
 print(
     "Quantidade de clusters:",
-    clustered["cluster_id"].nunique()
+    clusters["cluster_id"].nunique(),
 )
 
-print("\nTamanho dos maiores clusters:")
+
+print()
+print("=== TAMANHO DOS CLUSTERS ===")
 
 print(
-    clustered["cluster_id"]
+    clusters[
+        clusters["cluster_id"] >= 0
+    ]
+    .groupby("cluster_id")
+    .size()
+    .sort_values(
+        ascending=False
+    )
+    .head(30)
+)
+
+
+# ============================================================
+# ASSOCIAÇÃO DOS ACIDENTES AOS CLUSTERS
+# ============================================================
+
+clustered_accidents = assign_clusters_to_accidents(
+    valid_coordinates,
+    clusters,
+)
+
+
+print()
+print("=== ACIDENTES COM CLUSTER ===")
+
+print(
+    clustered_accidents[
+        [
+            "id",
+            "date",
+            "latitude",
+            "longitude",
+            "accident_type",
+            "cluster_id",
+        ]
+    ]
+    .head(20)
+    .to_string(index=False)
+)
+
+
+# ============================================================
+# DISTRIBUIÇÃO DOS ACIDENTES POR CLUSTER
+# ============================================================
+
+print()
+print("=== ACIDENTES POR CLUSTER ===")
+
+print(
+    clustered_accidents[
+        "cluster_id"
+    ]
     .value_counts()
     .head(30)
 )
 
-clustered = cluster_accidents(
-    ribeirao,
-    radius_meters=20,
+
+# ============================================================
+# TESTES DE CONSISTÊNCIA
+# ============================================================
+
+print()
+print("=== TESTES DE CONSISTÊNCIA ===")
+
+
+# ------------------------------------------------------------
+# Teste 1 — quantidade de acidentes preservada
+# ------------------------------------------------------------
+
+assert len(clustered_accidents) == len(
+    valid_coordinates
 )
-
-clusters = summarize_clusters(clustered)
-
-print("\n=== RESUMO DOS CLUSTERS ===")
 
 print(
-    clusters
-    .sort_values(
-        "accident_count",
-        ascending=False
-    )
-    .head(30)
-    .to_string(index=False)
+    "Quantidade de acidentes preservada."
 )
 
-print("\n=== PERÍODO ===")
 
-print("Data inicial:", normalized["date"].min())
-print("Data final:", normalized["date"].max())
+# ------------------------------------------------------------
+# Teste 2 — todos os acidentes receberam cluster
+# ------------------------------------------------------------
 
-print("\n=== COORDENADAS REPETIDAS ===")
+assert (
+    clustered_accidents["cluster_id"]
+    .notna()
+    .all()
+)
 
-coordinate_counts = (
-    ribeirao
-    .groupby(["latitude", "longitude"])
+print(
+    "Todos os acidentes receberam um cluster."
+)
+
+
+# ------------------------------------------------------------
+# Teste 3 — todos os clusters existem
+# ------------------------------------------------------------
+
+accident_clusters = set(
+    clustered_accidents[
+        "cluster_id"
+    ].unique()
+)
+
+available_clusters = set(
+    clusters[
+        "cluster_id"
+    ].unique()
+)
+
+assert accident_clusters.issubset(
+    available_clusters
+)
+
+print(
+    "Todos os clusters dos acidentes são válidos."
+)
+
+
+# ------------------------------------------------------------
+# Teste 4 — quantidade de acidentes por cluster
+# ------------------------------------------------------------
+
+accident_counts = (
+    clustered_accidents
+    .groupby("cluster_id")
     .size()
-    .sort_values(ascending=False)
+    .sort_index()
 )
 
-print(coordinate_counts.head(30))
-
-for radius in [10, 15, 20, 25, 30]:
-    clustered = cluster_accidents(
-        ribeirao,
-        radius_meters=radius,
-    )
-
-    print(
-        f"{radius}m → "
-        f"{clustered['cluster_id'].nunique()} clusters"
-    )
-    
-coordinate_groups = (
-    ribeirao
-    .groupby(["latitude", "longitude"])
-    .agg(
-        accident_count=("id", "count"),
-        collisions=(
-            "accident_type",
-            lambda x: (x == "COLISAO").sum(),
-        ),
-        pedestrians=(
-            "accident_type",
-            lambda x: (x == "ATROPELAMENTO").sum(),
-        ),
-    )
-    .reset_index()
-)
-
-print("\n=== PONTOS DE OCORRÊNCIA ===")
-
-print(
-    "Total de pontos:",
-    len(coordinate_groups)
-)
-
-print("\n=== MAIORES PONTOS ===")
-
-print(
-    coordinate_groups
-    .sort_values(
-        "accident_count",
-        ascending=False,
-    )
-    .head(30)
-    .to_string(index=False)
-)
-
-# ============================================================
-# ANÁLISE DOS PONTOS DE OCORRÊNCIA
-# ============================================================
-
-coordinate_groups = (
-    ribeirao
-    .groupby(["latitude", "longitude"])
-    .agg(
-        accident_count=("id", "count"),
-        collisions=(
-            "accident_type",
-            lambda x: (x == "COLISAO").sum(),
-        ),
-        pedestrians=(
-            "accident_type",
-            lambda x: (x == "ATROPELAMENTO").sum(),
-        ),
-    )
-    .reset_index()
-)
-
-print("\n=== PONTOS DE OCORRÊNCIA ===")
-
-print(
-    "Total de pontos:",
-    len(coordinate_groups),
-)
-
-print(
-    "Total de acidentes:",
-    len(ribeirao),
-)
-
-print("\n=== MAIORES PONTOS ===")
-
-print(
-    coordinate_groups
-    .sort_values(
-        "accident_count",
-        ascending=False,
-    )
-    .head(30)
-    .to_string(index=False)
-)
-
-
-# ============================================================
-# EXTREMOS DAS COORDENADAS
-# ============================================================
-
-print("\n=== EXTREMOS GEOGRÁFICOS ===")
-
-print(
-    "Latitude mínima:",
-    ribeirao["latitude"].min(),
-)
-
-print(
-    "Latitude máxima:",
-    ribeirao["latitude"].max(),
-)
-
-print(
-    "Longitude mínima:",
-    ribeirao["longitude"].min(),
-)
-
-print(
-    "Longitude máxima:",
-    ribeirao["longitude"].max(),
-)
-
-
-# ============================================================
-# PONTOS SUSPEITOS
-# ============================================================
-
-print("\n=== PONTOS MAIS DISTANTES DO CENTRO APROXIMADO ===")
-
-CENTER_LAT = -21.1775
-CENTER_LON = -47.8103
-
-ribeirao["distance_approx"] = (
-    (ribeirao["latitude"] - CENTER_LAT) ** 2
-    + (ribeirao["longitude"] - CENTER_LON) ** 2
-) ** 0.5
-
-print(
-    ribeirao[
-        [
-            "id",
-            "latitude",
-            "longitude",
-            "city",
-            "accident_type",
-            "distance_approx",
-        ]
+point_counts = (
+    clusters
+    .groupby("cluster_id")[
+        "accident_count"
     ]
+    .sum()
+    .sort_index()
+)
+
+
+pd.testing.assert_series_equal(
+    accident_counts,
+    point_counts,
+    check_names=False,
+)
+
+print(
+    "Contagem de acidentes por cluster consistente."
+)
+
+
+# ------------------------------------------------------------
+# Teste 5 — quantidade de pontos preservada
+# ------------------------------------------------------------
+
+assert (
+    clusters["cluster_id"].nunique()
+    <= len(points)
+)
+
+print(
+    "Quantidade de pontos preservada."
+)
+
+
+# ============================================================
+# RESUMO DOS CLUSTERS
+# ============================================================
+
+cluster_summary = (
+    clustered_accidents
+    .groupby("cluster_id")
+    .agg(
+        latitude=(
+            "latitude",
+            "mean",
+        ),
+
+        longitude=(
+            "longitude",
+            "mean",
+        ),
+
+        point_count=(
+            "id",
+            lambda x: (
+                clustered_accidents
+                .loc[x.index, "latitude"]
+                .astype(str)
+                + "_"
+                + clustered_accidents
+                .loc[x.index, "longitude"]
+                .astype(str)
+            ).nunique(),
+        ),
+
+        accident_count=(
+            "id",
+            "count",
+        ),
+
+        collisions=(
+            "accident_type",
+            lambda x: (
+                x == "COLISAO"
+            ).sum(),
+        ),
+
+        pedestrians=(
+            "accident_type",
+            lambda x: (
+                x == "ATROPELAMENTO"
+            ).sum(),
+        ),
+    )
+    .reset_index()
+)
+
+
+print()
+print("=== RESUMO DOS CLUSTERS ===")
+
+print(
+    "Total de clusters:",
+    len(cluster_summary),
+)
+
+
+print()
+
+print(
+    cluster_summary
     .sort_values(
-        "distance_approx",
+        "accident_count",
         ascending=False,
     )
     .head(30)
     .to_string(index=False)
 )
+
+
+# ============================================================
+# RESULTADO FINAL
+# ============================================================
+
+print()
+print("=== RESULTADO ===")
+print("Todos os testes passaram.")
