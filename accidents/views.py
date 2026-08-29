@@ -42,6 +42,11 @@ def analysis_view(request):
         "map_data": map_data,
         "import_error": import_error,
         "import_summary": import_summary,
+        "initial_tool_tab": (
+            "filters"
+            if import_summary
+            else "data"
+        ),
     }
 
     return render(

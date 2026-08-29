@@ -6,11 +6,17 @@ const fileSelectionSummary = document.getElementById(
 const selectedFiles = document.getElementById("selected-files");
 const analyzeButton = document.getElementById("analyze-button");
 const clearFilesButton = document.getElementById("clear-files-button");
-const uploadPanel = document.getElementById("upload-panel");
-const minimizeUploadPanel = document.getElementById(
-    "minimize-upload-panel"
+const toolsPanel = document.getElementById("tools-panel");
+const minimizeToolsPanel = document.getElementById(
+    "minimize-tools-panel"
 );
-const openUploadPanel = document.getElementById("open-upload-panel");
+const openToolsPanel = document.getElementById("open-tools-panel");
+const toolsTabs = Array.from(
+    document.querySelectorAll("[data-tools-tab]")
+);
+const toolsTabPanels = Array.from(
+    document.querySelectorAll("[data-tools-tab-panel]")
+);
 
 
 function formatFileSize(bytes) {
@@ -65,7 +71,7 @@ function updateSelectedFiles() {
 
 
 function clearFiles() {
-    if (uploadPanel.dataset.hasServerState === "true") {
+    if (toolsPanel.dataset.hasServerState === "true") {
         window.location.assign("/");
         return;
     }
@@ -76,24 +82,46 @@ function clearFiles() {
 }
 
 
-function setUploadPanelExpanded(expanded) {
-    uploadPanel.hidden = !expanded;
-    openUploadPanel.hidden = expanded;
-    minimizeUploadPanel.setAttribute("aria-expanded", String(expanded));
-    openUploadPanel.setAttribute("aria-expanded", String(expanded));
+function setActiveToolsTab(tabName) {
+    toolsTabs.forEach((tab) => {
+        const isActive = tab.dataset.toolsTab === tabName;
+
+        tab.classList.toggle("is-active", isActive);
+        tab.setAttribute("aria-selected", String(isActive));
+        tab.tabIndex = isActive ? 0 : -1;
+    });
+
+    toolsTabPanels.forEach((panel) => {
+        panel.hidden = panel.dataset.toolsTabPanel !== tabName;
+    });
+}
+
+
+function setToolsPanelExpanded(expanded) {
+    toolsPanel.hidden = !expanded;
+    openToolsPanel.hidden = expanded;
+    minimizeToolsPanel.setAttribute("aria-expanded", String(expanded));
+    openToolsPanel.setAttribute("aria-expanded", String(expanded));
 }
 
 
 fileInput.addEventListener("change", updateSelectedFiles);
 clearFilesButton.addEventListener("click", clearFiles);
-minimizeUploadPanel.addEventListener("click", () => {
-    setUploadPanelExpanded(false);
+toolsTabs.forEach((tab) => {
+    tab.addEventListener("click", () => {
+        setActiveToolsTab(tab.dataset.toolsTab);
+    });
 });
-openUploadPanel.addEventListener("click", () => {
-    setUploadPanelExpanded(true);
+minimizeToolsPanel.addEventListener("click", () => {
+    setToolsPanelExpanded(false);
+});
+openToolsPanel.addEventListener("click", () => {
+    setToolsPanelExpanded(true);
 });
 
 uploadForm.addEventListener("submit", () => {
     analyzeButton.disabled = true;
     analyzeButton.textContent = "Processando...";
 });
+
+setActiveToolsTab(toolsPanel.dataset.initialTab);

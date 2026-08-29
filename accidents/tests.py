@@ -238,16 +238,19 @@ class AnalysisViewTests(SimpleTestCase):
         self.assertContains(response, "disabled")
         self.assertContains(response, 'id="clear-files-button"')
         self.assertContains(response, "Limpar arquivos")
-        self.assertContains(response, 'id="minimize-upload-panel"')
-        self.assertContains(response, 'id="open-upload-panel"')
-        self.assertContains(response, 'id="filter-panel"')
+        self.assertContains(response, 'id="tools-panel"', count=1)
+        self.assertContains(response, 'id="data-tab"')
+        self.assertContains(response, 'id="filters-tab"')
         self.assertContains(response, 'data-filter-field="collision_1y_met"')
         self.assertContains(response, 'data-filter-field="collision_3y_met"')
         self.assertContains(response, 'data-filter-field="pedestrian_1y_met"')
         self.assertContains(response, 'data-filter-field="pedestrian_3y_met"')
         self.assertContains(response, 'id="clear-filters-button"')
-        self.assertContains(response, 'id="minimize-filter-panel"')
-        self.assertContains(response, 'id="open-filter-panel"')
+        self.assertContains(response, 'id="minimize-tools-panel"')
+        self.assertContains(response, 'id="open-tools-panel"')
+        self.assertNotContains(response, 'id="upload-panel"')
+        self.assertNotContains(response, 'id="filter-panel"')
+        self.assertEqual(response.context["initial_tool_tab"], "data")
 
     @patch("accidents.views.build_map_data")
     @patch("accidents.views.process_accidents")
@@ -273,6 +276,10 @@ class AnalysisViewTests(SimpleTestCase):
         consolidated = process_accidents_mock.call_args.args[0]
         self.assertEqual(len(consolidated), 1)
         self.assertEqual(response.context["map_data"], self.map_data)
+        self.assertEqual(
+            response.context["initial_tool_tab"],
+            "filters",
+        )
         self.assertEqual(
             response.context["import_summary"],
             {

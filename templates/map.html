@@ -21,6 +21,12 @@
 
     <style>
 
+        :root {
+            --marker-collision: #6f42c1;
+            --marker-pedestrian: #dc3545;
+            --marker-both: #fd7e14;
+        }
+
         html,
         body {
             height: 100%;
@@ -32,14 +38,164 @@
             width: 100%;
         }
 
-        .upload-panel {
+        .map-marker {
+            border: 0;
+            background: transparent;
+        }
+
+        .map-marker__dot {
+            display: block;
+            box-sizing: border-box;
+            width: 18px;
+            height: 18px;
+            border: 3px solid #fff;
+            border-radius: 50%;
+            background: var(--marker-color);
+            box-shadow: 0 1px 5px rgba(0, 0, 0, 0.55);
+        }
+
+        .map-marker--collision,
+        .map-popup__category--collision {
+            --marker-color: var(--marker-collision);
+        }
+
+        .map-marker--pedestrian,
+        .map-popup__category--pedestrian {
+            --marker-color: var(--marker-pedestrian);
+        }
+
+        .map-marker--both,
+        .map-popup__category--both {
+            --marker-color: var(--marker-both);
+        }
+
+        .map-popup {
+            min-width: 240px;
+            max-width: 300px;
+            color: #212529;
+            font-family: Arial, sans-serif;
+            line-height: 1.35;
+        }
+
+        .map-popup__title {
+            margin: 0 0 8px;
+            overflow-wrap: anywhere;
+            font-size: 16px;
+        }
+
+        .map-popup__category {
+            display: inline-block;
+            margin-bottom: 10px;
+            padding: 4px 8px;
+            border-radius: 999px;
+            color: #fff;
+            background: var(--marker-color);
+            font-size: 12px;
+            font-weight: 700;
+        }
+
+        .map-popup__section {
+            margin-top: 10px;
+            padding-top: 9px;
+            border-top: 1px solid #dee2e6;
+        }
+
+        .map-popup__section-title {
+            margin: 0 0 5px;
+            font-size: 13px;
+        }
+
+        .map-popup__criteria {
+            margin: 0;
+            padding: 0;
+            list-style: none;
+        }
+
+        .map-popup__criteria-title {
+            margin: 6px 0 2px;
+            font-size: 12px;
+        }
+
+        .map-popup__criteria li {
+            margin: 3px 0;
+        }
+
+        .map-popup__criteria li::before {
+            content: "\2713";
+            margin-right: 6px;
+            color: #198754;
+            font-weight: 700;
+        }
+
+        .map-popup__stats {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 12px;
+        }
+
+        .map-popup__stats th,
+        .map-popup__stats td {
+            padding: 3px 5px;
+            text-align: right;
+        }
+
+        .map-popup__stats th:first-child,
+        .map-popup__stats td:first-child {
+            padding-left: 0;
+            text-align: left;
+        }
+
+        .map-legend {
+            padding: 9px 11px;
+            border-radius: 6px;
+            background: rgba(255, 255, 255, 0.94);
+            box-shadow: 0 1px 5px rgba(0, 0, 0, 0.35);
+            color: #212529;
+            font: 13px/1.4 Arial, sans-serif;
+        }
+
+        .map-legend strong {
+            display: block;
+            margin-bottom: 5px;
+        }
+
+        .map-legend__item {
+            display: flex;
+            gap: 7px;
+            align-items: center;
+            margin: 3px 0;
+        }
+
+        .map-legend__dot {
+            width: 11px;
+            height: 11px;
+            border: 2px solid #fff;
+            border-radius: 50%;
+            box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.18);
+        }
+
+        .map-legend__dot--collision {
+            background: var(--marker-collision);
+        }
+
+        .map-legend__dot--pedestrian {
+            background: var(--marker-pedestrian);
+        }
+
+        .map-legend__dot--both {
+            background: var(--marker-both);
+        }
+
+        .tools-panel {
             position: absolute;
             top: 12px;
             right: 12px;
             z-index: 1000;
             box-sizing: border-box;
             width: min(360px, calc(100% - 70px));
+            max-height: calc(100% - 24px);
             padding: 16px;
+            overflow-y: auto;
             border-radius: 8px;
             background: rgba(255, 255, 255, 0.96);
             box-shadow: 0 1px 5px rgba(0, 0, 0, 0.35);
@@ -47,12 +203,12 @@
             font-size: 14px;
         }
 
-        .upload-panel h1 {
+        .tools-panel h1 {
             margin: 0;
             font-size: 18px;
         }
 
-        .upload-panel-header {
+        .tools-panel-header {
             display: flex;
             gap: 12px;
             align-items: center;
@@ -78,7 +234,7 @@
             background: #e9ecef;
         }
 
-        .open-upload-panel-button {
+        .open-tools-panel-button {
             position: absolute;
             top: 12px;
             right: 12px;
@@ -95,28 +251,8 @@
             font-size: 22px;
         }
 
-        .open-upload-panel-button:hover {
+        .open-tools-panel-button:hover {
             background: #0b5ed7;
-        }
-
-        .filter-panel {
-            position: absolute;
-            right: 12px;
-            bottom: 28px;
-            z-index: 1000;
-            box-sizing: border-box;
-            width: min(280px, calc(100% - 24px));
-            padding: 16px;
-            border-radius: 8px;
-            background: rgba(255, 255, 255, 0.96);
-            box-shadow: 0 1px 5px rgba(0, 0, 0, 0.35);
-            font-family: Arial, sans-serif;
-            font-size: 14px;
-        }
-
-        .filter-panel h2 {
-            margin: 0;
-            font-size: 18px;
         }
 
         .filter-group {
@@ -163,35 +299,34 @@
             background: #6c757d;
         }
 
-        .open-filter-panel-button {
-            position: absolute;
-            right: 12px;
-            bottom: 28px;
-            z-index: 1000;
-            width: 48px;
-            height: 48px;
-            padding: 11px;
-            border: 0;
-            border-radius: 50%;
-            color: #fff;
-            background: #0d6efd;
-            box-shadow: 0 1px 5px rgba(0, 0, 0, 0.35);
-            cursor: pointer;
-        }
-
-        .open-filter-panel-button:hover {
-            background: #0b5ed7;
-        }
-
-        .open-filter-panel-button svg {
-            display: block;
-            width: 100%;
-            height: 100%;
-            fill: currentColor;
-        }
-
         [hidden] {
             display: none !important;
+        }
+
+        .tools-tabs {
+            display: flex;
+            margin: 12px 0;
+            border-bottom: 1px solid #dee2e6;
+        }
+
+        .tools-tab {
+            flex: 1;
+            padding: 9px 8px;
+            border: 0;
+            border-bottom: 3px solid transparent;
+            color: #6c757d;
+            background: transparent;
+            cursor: pointer;
+            font-weight: 600;
+        }
+
+        .tools-tab:hover {
+            color: #0d6efd;
+        }
+
+        .tools-tab.is-active {
+            border-bottom-color: #0d6efd;
+            color: #0d6efd;
         }
 
         .upload-intro {
@@ -337,20 +472,11 @@
         }
 
         @media (max-width: 520px) {
-            .upload-panel {
+            .tools-panel {
                 top: 10px;
                 right: 10px;
                 width: calc(100% - 70px);
                 max-height: calc(100% - 20px);
-                overflow-y: auto;
-            }
-
-            .filter-panel {
-                right: 10px;
-                bottom: 26px;
-                width: calc(100% - 20px);
-                max-height: calc(100% - 20px);
-                overflow-y: auto;
             }
         }
 
@@ -363,20 +489,21 @@
     <div id="map"></div>
 
     <section
-        id="upload-panel"
-        class="upload-panel"
-        aria-label="Importação de arquivos de sinistros"
+        id="tools-panel"
+        class="tools-panel"
+        aria-label="Ferramentas de análise de sinistros"
         data-has-server-state="{% if import_summary or import_error %}true{% else %}false{% endif %}"
+        data-initial-tab="{{ initial_tool_tab }}"
     >
-        <div class="upload-panel-header">
-            <h1>Analisar arquivos Infosiga</h1>
+        <div class="tools-panel-header">
+            <h1>Análise de sinistros</h1>
 
             <button
-                id="minimize-upload-panel"
+                id="minimize-tools-panel"
                 class="minimize-panel-button"
                 type="button"
-                aria-label="Minimizar formulário de upload"
-                aria-controls="upload-panel"
+                aria-label="Minimizar painel de ferramentas"
+                aria-controls="tools-panel"
                 aria-expanded="true"
                 title="Minimizar painel"
             >
@@ -384,192 +511,205 @@
             </button>
         </div>
 
-        <p class="upload-intro">
-            Selecione um ou mais CSVs para gerar os locais elegíveis.
-        </p>
-
-        <form
-            id="upload-form"
-            method="post"
-            enctype="multipart/form-data"
+        <div
+            class="tools-tabs"
+            role="tablist"
+            aria-label="Ferramentas do mapa"
         >
-            {% csrf_token %}
-
-            <input
-                id="file-input"
-                class="file-input"
-                type="file"
-                name="files"
-                accept=".csv"
-                multiple
-                required
-            >
-
-            <label
-                class="file-selector"
-                for="file-input"
-            >
-                <strong>Selecionar arquivos CSV</strong>
-                <span>Você pode selecionar vários arquivos do Infosiga</span>
-            </label>
-
-            <p
-                id="file-selection-summary"
-                class="file-selection-summary"
-                aria-live="polite"
-            >
-                Nenhum arquivo selecionado
-            </p>
-
-            <ul
-                id="selected-files"
-                class="selected-files"
-            ></ul>
-
             <button
-                id="analyze-button"
-                class="analyze-button"
-                type="submit"
-                disabled
+                id="data-tab"
+                class="tools-tab{% if initial_tool_tab == 'data' %} is-active{% endif %}"
+                type="button"
+                role="tab"
+                aria-controls="data-tab-panel"
+                aria-selected="{% if initial_tool_tab == 'data' %}true{% else %}false{% endif %}"
+                tabindex="{% if initial_tool_tab == 'data' %}0{% else %}-1{% endif %}"
+                data-tools-tab="data"
             >
-                Analisar arquivos
+                Dados
             </button>
 
             <button
-                id="clear-files-button"
-                class="clear-files-button"
+                id="filters-tab"
+                class="tools-tab{% if initial_tool_tab == 'filters' %} is-active{% endif %}"
                 type="button"
+                role="tab"
+                aria-controls="filters-tab-panel"
+                aria-selected="{% if initial_tool_tab == 'filters' %}true{% else %}false{% endif %}"
+                tabindex="{% if initial_tool_tab == 'filters' %}0{% else %}-1{% endif %}"
+                data-tools-tab="filters"
             >
-                Limpar arquivos
-            </button>
-        </form>
-
-        {% if import_summary %}
-            <div class="upload-feedback upload-success">
-                <strong>Análise concluída</strong>
-                <ul class="upload-result-list">
-                    <li>Arquivos: {{ import_summary.file_count }}</li>
-                    <li>Sinistros únicos: {{ import_summary.accident_count }}</li>
-                    <li>Locais elegíveis: {{ import_summary.eligible_count }}</li>
-                </ul>
-            </div>
-        {% endif %}
-
-        {% if import_error %}
-            <div
-                class="upload-feedback upload-error"
-                role="alert"
-            >
-                <strong>Não foi possível processar os arquivos.</strong>
-                {{ import_error }}
-            </div>
-        {% endif %}
-    </section>
-
-    <button
-        id="open-upload-panel"
-        class="open-upload-panel-button"
-        type="button"
-        aria-label="Abrir formulário de upload"
-        aria-controls="upload-panel"
-        aria-expanded="false"
-        title="Abrir painel de upload"
-        hidden
-    >
-        &#128196;
-    </button>
-
-    <section
-        id="filter-panel"
-        class="filter-panel"
-        aria-label="Filtros dos locais elegíveis"
-    >
-        <div class="upload-panel-header">
-            <h2>Filtros</h2>
-
-            <button
-                id="minimize-filter-panel"
-                class="minimize-panel-button"
-                type="button"
-                aria-label="Minimizar painel de filtros"
-                aria-controls="filter-panel"
-                aria-expanded="true"
-                title="Minimizar filtros"
-            >
-                &minus;
+                Filtros
             </button>
         </div>
 
-        <fieldset class="filter-group">
-            <legend>Colisões</legend>
-
-            <label class="filter-option">
-                <input
-                    type="checkbox"
-                    data-filter-field="collision_1y_met"
-                >
-                3+ em 1 ano
-            </label>
-
-            <label class="filter-option">
-                <input
-                    type="checkbox"
-                    data-filter-field="collision_3y_met"
-                >
-                7+ em 3 anos
-            </label>
-        </fieldset>
-
-        <fieldset class="filter-group">
-            <legend>Atropelamentos</legend>
-
-            <label class="filter-option">
-                <input
-                    type="checkbox"
-                    data-filter-field="pedestrian_1y_met"
-                >
-                2+ em 1 ano
-            </label>
-
-            <label class="filter-option">
-                <input
-                    type="checkbox"
-                    data-filter-field="pedestrian_3y_met"
-                >
-                4+ em 3 anos
-            </label>
-        </fieldset>
-
-        <p
-            id="filter-counter"
-            class="filter-counter"
-            aria-live="polite"
+        <div
+            id="data-tab-panel"
+            role="tabpanel"
+            aria-labelledby="data-tab"
+            data-tools-tab-panel="data"
+            {% if initial_tool_tab != 'data' %}hidden{% endif %}
         >
-            0 de 0 locais exibidos
-        </p>
+            <p
+                class="upload-intro"
+            >
+                Selecione um ou mais CSVs para gerar os locais elegíveis.
+            </p>
 
-        <button
-            id="clear-filters-button"
-            class="clear-filters-button"
-            type="button"
+            <form
+                id="upload-form"
+                method="post"
+                enctype="multipart/form-data"
+            >
+                {% csrf_token %}
+
+                <input
+                    id="file-input"
+                    class="file-input"
+                    type="file"
+                    name="files"
+                    accept=".csv"
+                    multiple
+                    required
+                >
+
+                <label
+                    class="file-selector"
+                    for="file-input"
+                >
+                    <strong>Selecionar arquivos CSV</strong>
+                    <span>Você pode selecionar vários arquivos do Infosiga</span>
+                </label>
+
+                <p
+                    id="file-selection-summary"
+                    class="file-selection-summary"
+                    aria-live="polite"
+                >
+                    Nenhum arquivo selecionado
+                </p>
+
+                <ul
+                    id="selected-files"
+                    class="selected-files"
+                ></ul>
+
+                <button
+                    id="analyze-button"
+                    class="analyze-button"
+                    type="submit"
+                    disabled
+                >
+                    Analisar arquivos
+                </button>
+
+                <button
+                    id="clear-files-button"
+                    class="clear-files-button"
+                    type="button"
+                >
+                    Limpar arquivos
+                </button>
+            </form>
+
+            {% if import_summary %}
+                <div class="upload-feedback upload-success">
+                    <strong>Análise concluída</strong>
+                    <ul class="upload-result-list">
+                        <li>Arquivos: {{ import_summary.file_count }}</li>
+                        <li>Sinistros únicos: {{ import_summary.accident_count }}</li>
+                        <li>Locais elegíveis: {{ import_summary.eligible_count }}</li>
+                    </ul>
+                </div>
+            {% endif %}
+
+            {% if import_error %}
+                <div
+                    class="upload-feedback upload-error"
+                    role="alert"
+                >
+                    <strong>Não foi possível processar os arquivos.</strong>
+                    {{ import_error }}
+                </div>
+            {% endif %}
+        </div>
+
+        <div
+            id="filters-tab-panel"
+            role="tabpanel"
+            aria-labelledby="filters-tab"
+            data-tools-tab-panel="filters"
+            {% if initial_tool_tab != 'filters' %}hidden{% endif %}
         >
-            Limpar filtros
-        </button>
+            <fieldset class="filter-group">
+                <legend>Colisões</legend>
+
+                <label class="filter-option">
+                    <input
+                        type="checkbox"
+                        data-filter-field="collision_1y_met"
+                    >
+                    3+ em 1 ano
+                </label>
+
+                <label class="filter-option">
+                    <input
+                        type="checkbox"
+                        data-filter-field="collision_3y_met"
+                    >
+                    7+ em 3 anos
+                </label>
+            </fieldset>
+
+            <fieldset class="filter-group">
+                <legend>Atropelamentos</legend>
+
+                <label class="filter-option">
+                    <input
+                        type="checkbox"
+                        data-filter-field="pedestrian_1y_met"
+                    >
+                    2+ em 1 ano
+                </label>
+
+                <label class="filter-option">
+                    <input
+                        type="checkbox"
+                        data-filter-field="pedestrian_3y_met"
+                    >
+                    4+ em 3 anos
+                </label>
+            </fieldset>
+
+            <p
+                id="filter-counter"
+                class="filter-counter"
+                aria-live="polite"
+            >
+                0 de 0 locais exibidos
+            </p>
+
+            <button
+                id="clear-filters-button"
+                class="clear-filters-button"
+                type="button"
+            >
+                Limpar filtros
+            </button>
+        </div>
     </section>
 
     <button
-        id="open-filter-panel"
-        class="open-filter-panel-button"
+        id="open-tools-panel"
+        class="open-tools-panel-button"
         type="button"
-        aria-label="Abrir painel de filtros"
-        aria-controls="filter-panel"
+        aria-label="Abrir painel de ferramentas"
+        aria-controls="tools-panel"
         aria-expanded="false"
-        title="Abrir filtros"
+        title="Abrir ferramentas"
         hidden
     >
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M3 5h18l-7 8v5l-4 2v-7L3 5z"></path>
-        </svg>
+        &#9776;
     </button>
 
     {{ map_data|json_script:"map-data" }}
