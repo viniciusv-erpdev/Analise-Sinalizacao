@@ -18,8 +18,7 @@ from analysis.spatial import (
 )
 
 from analysis.criteria import (
-    count_cluster_accidents,
-    evaluate_criteria,
+    evaluate_historical_criteria,
     add_criterion_classification,
 )
 
@@ -116,48 +115,11 @@ def process_accidents(df: pd.DataFrame) -> pd.DataFrame:
     )
 
     # ========================================================
-    # PERÍODO DA ANÁLISE
-    # ========================================================
-
-    end_date = normalized["date"].max()
-
-    one_year_start = (
-        end_date
-        - pd.DateOffset(years=1)
-    )
-
-    three_years_start = (
-        end_date
-        - pd.DateOffset(years=3)
-    )
-
-    # ========================================================
-    # CONTAGEM 1 ANO
-    # ========================================================
-
-    one_year = count_cluster_accidents(
-        clustered_accidents,
-        one_year_start,
-        end_date,
-    )
-
-    # ========================================================
-    # CONTAGEM 3 ANOS
-    # ========================================================
-
-    three_years = count_cluster_accidents(
-        clustered_accidents,
-        three_years_start,
-        end_date,
-    )
-
-    # ========================================================
     # CRITÉRIOS
     # ========================================================
 
-    criteria_result = evaluate_criteria(
-        one_year,
-        three_years,
+    criteria_result = evaluate_historical_criteria(
+        clustered_accidents
     )
 
     criteria_result = add_criterion_classification(

@@ -227,3 +227,130 @@ def add_criterion_classification(
     )
 
     return result
+
+
+def count_historical_cluster_accidents(
+    accidents: pd.DataFrame,
+    years: int,
+) -> pd.DataFrame:
+    """
+    Encontra as maiores contagens em qualquer janela histórica
+    de ``years`` anos para cada cluster.
+
+    As janelas usam anos-calendário e incluem as datas inicial
+    e final.
+    """
+
+    required_columns = {
+        "id",
+        "date",
+        "cluster_id",
+        "accident_type",
+    }
+
+    missing = required_columns - set(accidents.columns)
+
+    if missing:
+        raise ValueError(
+            f"Colunas obrigatórias ausentes: {missing}"
+        )
+
+    if years <= 0:
+        raise ValueError(
+            "A duração da janela deve ser maior que zero."
+        )
+
+    valid_dates = accidents[
+        accidents["date"].notna()
+    ].sort_values(
+        ["cluster_id", "date"]
+    )
+
+    rows = []
+    offset = pd.DateOffset(years=years)
+
+    for cluster_id, group in valid_dates.groupby(
+        "cluster_id",
+        sort=False,
+    ):
+        dates = group["date"].tolist()
+        accident_types = group["accident_type"].tolist()
+
+        left = 0
+        collisions = 0
+        pedestrians = 0
+        maximum_accidents = 0
+        maximum_collisions = 0
+        maximum_pedestrians = 0
+
+        for right, (date, accident_type) in enumerate(
+            zip(dates, accident_types)
+        ):
+            if accident_type == "COLISAO":
+                collisions += 1
+            elif accident_type == "ATROPELAMENTO":
+                pedestrians += 1
+
+            window_start = date - offset
+
+            while dates[left] < window_start:
+                removed_type = accident_types[left]
+
+                if removed_type == "COLISAO":
+                    collisions -= 1
+                elif removed_type == "ATROPELAMENTO":
+                    pedestrians -= 1
+
+                left += 1
+
+            maximum_accidents = max(
+                maximum_accidents,
+                right - left + 1,
+            )
+            maximum_collisions = max(
+                maximum_collisions,
+                collisions,
+            )
+            maximum_pedestrians = max(
+                maximum_pedestrians,
+                pedestrians,
+            )
+
+        rows.append(
+            {
+                "cluster_id": cluster_id,
+                "accident_count": maximum_accidents,
+                "collisions": maximum_collisions,
+                "pedestrians": maximum_pedestrians,
+            }
+        )
+
+    return pd.DataFrame(
+        rows,
+        columns=[
+            "cluster_id",
+            "accident_count",
+            "collisions",
+            "pedestrians",
+        ],
+    )
+
+
+def evaluate_historical_criteria(
+    accidents: pd.DataFrame,
+) -> pd.DataFrame:
+    """Avalia os critérios em qualquer janela histórica válida."""
+
+    one_year = count_historical_cluster_accidents(
+        accidents,
+        years=1,
+    )
+    three_years = count_historical_cluster_accidents(
+        accidents,
+        years=3,
+    )
+
+    return evaluate_criteria(
+        one_year,
+        three_years,
+    )

@@ -8,7 +8,10 @@ from accidents.services import (
     AccidentImportError,
     import_accident_files,
 )
-from analysis.criteria import evaluate_criteria
+from analysis.criteria import (
+    evaluate_criteria,
+    evaluate_historical_criteria,
+)
 from analysis.map_data import build_map_data
 from analysis.pipeline import (
     process_accidents,
@@ -210,6 +213,114 @@ class MapFilterDataTests(SimpleTestCase):
         self.assertIs(result[0]["collision_3y_met"], False)
         self.assertIs(result[0]["pedestrian_1y_met"], False)
         self.assertIs(result[0]["pedestrian_3y_met"], False)
+
+
+class HistoricalCriteriaTests(SimpleTestCase):
+    @staticmethod
+    def build_accidents(rows):
+        dataframe = pd.DataFrame(
+            rows,
+            columns=[
+                "id",
+                "date",
+                "cluster_id",
+                "accident_type",
+            ],
+        )
+        dataframe["date"] = pd.to_datetime(
+            dataframe["date"]
+        )
+        return dataframe
+
+    def test_preserves_historical_eligibility_after_newer_event(self):
+        accidents = self.build_accidents(
+            [
+                [1, "2024-01-10", 1, "COLISAO"],
+                [2, "2024-04-10", 1, "COLISAO"],
+                [3, "2024-08-10", 1, "COLISAO"],
+                [4, "2026-07-01", 2, "CHOQUE"],
+            ]
+        )
+
+        result = evaluate_historical_criteria(accidents)
+        cluster = result[result["cluster_id"] == 1].iloc[0]
+
+        self.assertTrue(cluster["collision_1y_met"])
+        self.assertTrue(cluster["eligible"])
+
+    def test_combines_events_across_dataset_boundary(self):
+        accidents = self.build_accidents(
+            [
+                [1, "2024-07-01", 1, "COLISAO"],
+                [2, "2024-12-01", 1, "COLISAO"],
+                [3, "2025-06-30", 1, "COLISAO"],
+            ]
+        )
+
+        result = evaluate_historical_criteria(accidents)
+        cluster = result.iloc[0]
+
+        self.assertEqual(cluster["collisions_1y"], 3)
+        self.assertTrue(cluster["collision_1y_met"])
+
+    def test_finds_seven_collisions_in_historical_three_year_window(self):
+        accidents = self.build_accidents(
+            [
+                [1, "2018-01-01", 1, "COLISAO"],
+                [2, "2020-01-01", 1, "COLISAO"],
+                [3, "2020-06-01", 1, "COLISAO"],
+                [4, "2021-01-01", 1, "COLISAO"],
+                [5, "2021-06-01", 1, "COLISAO"],
+                [6, "2022-01-01", 1, "COLISAO"],
+                [7, "2022-06-01", 1, "COLISAO"],
+                [8, "2023-01-01", 1, "COLISAO"],
+            ]
+        )
+
+        result = evaluate_historical_criteria(accidents)
+        cluster = result.iloc[0]
+
+        self.assertEqual(cluster["collisions_3y"], 7)
+        self.assertTrue(cluster["collision_3y_met"])
+
+    def test_finds_pedestrian_criteria_in_historical_windows(self):
+        accidents = self.build_accidents(
+            [
+                [1, "2020-01-01", 1, "ATROPELAMENTO"],
+                [2, "2020-06-01", 1, "ATROPELAMENTO"],
+                [3, "2022-01-01", 2, "ATROPELAMENTO"],
+                [4, "2022-10-01", 2, "ATROPELAMENTO"],
+                [5, "2023-08-01", 2, "ATROPELAMENTO"],
+                [6, "2024-07-01", 2, "ATROPELAMENTO"],
+            ]
+        )
+
+        result = evaluate_historical_criteria(accidents).set_index(
+            "cluster_id"
+        )
+
+        self.assertTrue(result.loc[1, "pedestrian_1y_met"])
+        self.assertTrue(result.loc[2, "pedestrian_3y_met"])
+
+    def test_does_not_combine_events_outside_valid_windows(self):
+        accidents = self.build_accidents(
+            [
+                [1, "2015-01-01", 1, "COLISAO"],
+                [2, "2017-01-02", 1, "COLISAO"],
+                [3, "2019-01-03", 1, "COLISAO"],
+                [4, "2015-01-01", 1, "ATROPELAMENTO"],
+                [5, "2019-01-02", 1, "ATROPELAMENTO"],
+            ]
+        )
+
+        result = evaluate_historical_criteria(accidents)
+        cluster = result.iloc[0]
+
+        self.assertFalse(cluster["collision_1y_met"])
+        self.assertFalse(cluster["collision_3y_met"])
+        self.assertFalse(cluster["pedestrian_1y_met"])
+        self.assertFalse(cluster["pedestrian_3y_met"])
+        self.assertFalse(cluster["eligible"])
 
 class AnalysisViewTests(SimpleTestCase):
     map_data = [
