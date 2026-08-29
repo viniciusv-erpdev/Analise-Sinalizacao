@@ -34,13 +34,6 @@ from analysis.location import (
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-INPUT_PATH = (
-    BASE_DIR
-    / "data"
-    / "raw"
-    / "sinistros_2025-2026.csv"
-)
-
 MUNICIPALITY_PATH = (
     BASE_DIR
     / "data"
@@ -50,25 +43,7 @@ MUNICIPALITY_PATH = (
 )
 
 
-def run_analysis():
-
-    # ========================================================
-    # LEITURA
-    # ========================================================
-
-    try:
-        df = pd.read_csv(
-            INPUT_PATH,
-            sep=";",
-            encoding="utf-8",
-        )
-
-    except UnicodeDecodeError:
-        df = pd.read_csv(
-            INPUT_PATH,
-            sep=";",
-            encoding="latin-1",
-        )
+def process_accidents(df: pd.DataFrame) -> pd.DataFrame:
 
     # ========================================================
     # NORMALIZAÇÃO

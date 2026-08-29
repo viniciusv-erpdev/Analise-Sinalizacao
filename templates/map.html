@@ -32,6 +32,161 @@
             width: 100%;
         }
 
+        .upload-panel {
+            position: absolute;
+            top: 12px;
+            right: 12px;
+            z-index: 1000;
+            box-sizing: border-box;
+            width: min(360px, calc(100% - 70px));
+            padding: 16px;
+            border-radius: 8px;
+            background: rgba(255, 255, 255, 0.96);
+            box-shadow: 0 1px 5px rgba(0, 0, 0, 0.35);
+            font-family: Arial, sans-serif;
+            font-size: 14px;
+        }
+
+        .upload-panel h1 {
+            margin: 0 0 4px;
+            font-size: 18px;
+        }
+
+        .upload-intro {
+            margin: 0 0 12px;
+            color: #495057;
+            line-height: 1.4;
+        }
+
+        .file-input {
+            position: absolute;
+            width: 1px;
+            height: 1px;
+            overflow: hidden;
+            clip: rect(0, 0, 0, 0);
+            white-space: nowrap;
+        }
+
+        .file-selector {
+            display: block;
+            padding: 18px 12px;
+            border: 2px dashed #6c757d;
+            border-radius: 6px;
+            text-align: center;
+            cursor: pointer;
+            transition: border-color 0.15s, background-color 0.15s;
+        }
+
+        .file-selector:hover,
+        .file-selector:focus-within {
+            border-color: #0d6efd;
+            background: #f4f8ff;
+        }
+
+        .file-selector strong,
+        .file-selector span {
+            display: block;
+        }
+
+        .file-selector span {
+            margin-top: 4px;
+            color: #6c757d;
+            font-size: 12px;
+        }
+
+        .file-selection-summary {
+            margin: 12px 0 6px;
+            font-weight: 600;
+        }
+
+        .selected-files {
+            max-height: 130px;
+            margin: 0 0 12px;
+            padding: 0;
+            overflow-y: auto;
+            list-style: none;
+        }
+
+        .selected-files li {
+            display: flex;
+            gap: 8px;
+            justify-content: space-between;
+            padding: 5px 2px;
+            border-bottom: 1px solid #e9ecef;
+        }
+
+        .selected-file-name {
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .selected-file-name::before {
+            content: "\2713";
+            margin-right: 6px;
+            color: #198754;
+        }
+
+        .selected-file-size {
+            flex: none;
+            color: #6c757d;
+            font-size: 12px;
+        }
+
+        .analyze-button {
+            width: 100%;
+            padding: 9px 12px;
+            border: 0;
+            border-radius: 4px;
+            color: #fff;
+            background: #0d6efd;
+            cursor: pointer;
+            font-weight: 600;
+        }
+
+        .analyze-button:disabled {
+            background: #9aa0a6;
+            cursor: not-allowed;
+        }
+
+        .upload-feedback {
+            margin-top: 12px;
+            padding: 10px;
+            border-radius: 5px;
+            line-height: 1.4;
+        }
+
+        .upload-success {
+            color: #0f5132;
+            background: #d1e7dd;
+        }
+
+        .upload-feedback strong {
+            display: block;
+            margin-bottom: 4px;
+        }
+
+        .upload-result-list {
+            margin: 0;
+            padding-left: 18px;
+        }
+
+        .upload-error {
+            color: #842029;
+            background: #f8d7da;
+        }
+
+        @media (max-width: 520px) {
+            .upload-panel {
+                top: 10px;
+                right: 10px;
+                width: calc(100% - 70px);
+                max-height: calc(100% - 20px);
+                overflow-y: auto;
+            }
+        }
+
     </style>
 
 </head>
@@ -40,14 +195,99 @@
 
     <div id="map"></div>
 
+    <section
+        class="upload-panel"
+        aria-label="Importação de arquivos de sinistros"
+    >
+        <h1>Analisar arquivos Infosiga</h1>
+
+        <p class="upload-intro">
+            Selecione um ou mais CSVs para gerar os locais elegíveis.
+        </p>
+
+        <form
+            id="upload-form"
+            method="post"
+            enctype="multipart/form-data"
+        >
+            {% csrf_token %}
+
+            <input
+                id="file-input"
+                class="file-input"
+                type="file"
+                name="files"
+                accept=".csv"
+                multiple
+                required
+            >
+
+            <label
+                class="file-selector"
+                for="file-input"
+            >
+                <strong>Selecionar arquivos CSV</strong>
+                <span>Você pode selecionar vários arquivos do Infosiga</span>
+            </label>
+
+            <p
+                id="file-selection-summary"
+                class="file-selection-summary"
+                aria-live="polite"
+            >
+                Nenhum arquivo selecionado
+            </p>
+
+            <ul
+                id="selected-files"
+                class="selected-files"
+            ></ul>
+
+            <button
+                id="analyze-button"
+                class="analyze-button"
+                type="submit"
+                disabled
+            >
+                Analisar arquivos
+            </button>
+        </form>
+
+        {% if import_summary %}
+            <div class="upload-feedback upload-success">
+                <strong>Análise concluída</strong>
+                <ul class="upload-result-list">
+                    <li>Arquivos: {{ import_summary.file_count }}</li>
+                    <li>Sinistros únicos: {{ import_summary.accident_count }}</li>
+                    <li>Locais elegíveis: {{ import_summary.eligible_count }}</li>
+                </ul>
+            </div>
+        {% endif %}
+
+        {% if import_error %}
+            <div
+                class="upload-feedback upload-error"
+                role="alert"
+            >
+                <strong>Não foi possível processar os arquivos.</strong>
+                {{ import_error }}
+            </div>
+        {% endif %}
+    </section>
+
     {{ map_data|json_script:"map-data" }}
 
     <script
-        src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js">
+        src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+        referrerpolicy="origin">
     </script>
 
     <script
         src="{% static 'js/map.js' %}">
+    </script>
+
+    <script
+        src="{% static 'js/upload.js' %}">
     </script>
 
 </body>
