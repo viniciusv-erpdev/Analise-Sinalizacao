@@ -5,6 +5,12 @@ const fileSelectionSummary = document.getElementById(
 );
 const selectedFiles = document.getElementById("selected-files");
 const analyzeButton = document.getElementById("analyze-button");
+const clearFilesButton = document.getElementById("clear-files-button");
+const uploadPanel = document.getElementById("upload-panel");
+const minimizeUploadPanel = document.getElementById(
+    "minimize-upload-panel"
+);
+const openUploadPanel = document.getElementById("open-upload-panel");
 
 
 function formatFileSize(bytes) {
@@ -58,7 +64,34 @@ function updateSelectedFiles() {
 }
 
 
+function clearFiles() {
+    if (uploadPanel.dataset.hasServerState === "true") {
+        window.location.assign("/");
+        return;
+    }
+
+    fileInput.value = "";
+    analyzeButton.textContent = "Analisar arquivos";
+    updateSelectedFiles();
+}
+
+
+function setUploadPanelExpanded(expanded) {
+    uploadPanel.hidden = !expanded;
+    openUploadPanel.hidden = expanded;
+    minimizeUploadPanel.setAttribute("aria-expanded", String(expanded));
+    openUploadPanel.setAttribute("aria-expanded", String(expanded));
+}
+
+
 fileInput.addEventListener("change", updateSelectedFiles);
+clearFilesButton.addEventListener("click", clearFiles);
+minimizeUploadPanel.addEventListener("click", () => {
+    setUploadPanelExpanded(false);
+});
+openUploadPanel.addEventListener("click", () => {
+    setUploadPanelExpanded(true);
+});
 
 uploadForm.addEventListener("submit", () => {
     analyzeButton.disabled = true;

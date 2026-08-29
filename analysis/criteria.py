@@ -140,14 +140,27 @@ def evaluate_criteria(
         suffixes=("_1y", "_3y"),
     ).fillna(0)
 
+    result["collision_1y_met"] = (
+        result["collisions_1y"] >= 3
+    )
+    result["collision_3y_met"] = (
+        result["collisions_3y"] >= 7
+    )
+    result["pedestrian_1y_met"] = (
+        result["pedestrians_1y"] >= 2
+    )
+    result["pedestrian_3y_met"] = (
+        result["pedestrians_3y"] >= 4
+    )
+
     result["collision_criterion"] = (
-        (result["collisions_1y"] >= 3)
-        | (result["collisions_3y"] >= 7)
+        result["collision_1y_met"]
+        | result["collision_3y_met"]
     )
 
     result["pedestrian_criterion"] = (
-        (result["pedestrians_1y"] >= 2)
-        | (result["pedestrians_3y"] >= 4)
+        result["pedestrian_1y_met"]
+        | result["pedestrian_3y_met"]
     )
 
     result["eligible"] = (

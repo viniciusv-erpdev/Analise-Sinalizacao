@@ -8,6 +8,8 @@ from accidents.services import (
     AccidentImportError,
     import_accident_files,
 )
+from analysis.criteria import evaluate_criteria
+from analysis.map_data import build_map_data
 from analysis.pipeline import (
     process_accidents,
 )
@@ -145,6 +147,70 @@ class PipelineTests(SimpleTestCase):
         self.assertTrue(result.iloc[0]["eligible"])
         self.assertEqual(result.iloc[0]["collisions_1y"], 3)
 
+
+class MapFilterDataTests(SimpleTestCase):
+    def test_criteria_exposes_each_filter_condition(self):
+        one_year = pd.DataFrame(
+            [
+                {
+                    "cluster_id": 1,
+                    "accident_count": 5,
+                    "collisions": 3,
+                    "pedestrians": 2,
+                },
+                {
+                    "cluster_id": 2,
+                    "accident_count": 1,
+                    "collisions": 0,
+                    "pedestrians": 0,
+                },
+            ]
+        )
+        three_years = pd.DataFrame(
+            [
+                {
+                    "cluster_id": 1,
+                    "accident_count": 6,
+                    "collisions": 6,
+                    "pedestrians": 3,
+                },
+                {
+                    "cluster_id": 2,
+                    "accident_count": 11,
+                    "collisions": 7,
+                    "pedestrians": 4,
+                },
+            ]
+        )
+
+        result = evaluate_criteria(one_year, three_years)
+        cluster_1 = result[result["cluster_id"] == 1].iloc[0]
+        cluster_2 = result[result["cluster_id"] == 2].iloc[0]
+
+        self.assertTrue(cluster_1["collision_1y_met"])
+        self.assertFalse(cluster_1["collision_3y_met"])
+        self.assertTrue(cluster_1["pedestrian_1y_met"])
+        self.assertFalse(cluster_1["pedestrian_3y_met"])
+        self.assertFalse(cluster_2["collision_1y_met"])
+        self.assertTrue(cluster_2["collision_3y_met"])
+        self.assertFalse(cluster_2["pedestrian_1y_met"])
+        self.assertTrue(cluster_2["pedestrian_3y_met"])
+
+    def test_map_data_contains_boolean_filter_flags(self):
+        rows = [
+            [index, "31/07/2026", -21.1775, -47.8103, "COLISAO", "RUA A", 10, "RIBEIRAO PRETO"]
+            for index in range(1, 4)
+        ]
+        dataframe = pd.DataFrame(rows, columns=SOURCE_COLUMNS)
+
+        result = build_map_data(process_accidents(dataframe))
+
+        self.assertEqual(len(result), 1)
+        self.assertIs(result[0]["collision_1y_met"], True)
+        self.assertIs(result[0]["collision_3y_met"], False)
+        self.assertIs(result[0]["pedestrian_1y_met"], False)
+        self.assertIs(result[0]["pedestrian_3y_met"], False)
+
 class AnalysisViewTests(SimpleTestCase):
     map_data = [
         {
@@ -170,6 +236,18 @@ class AnalysisViewTests(SimpleTestCase):
         self.assertContains(response, 'id="selected-files"')
         self.assertContains(response, 'id="analyze-button"')
         self.assertContains(response, "disabled")
+        self.assertContains(response, 'id="clear-files-button"')
+        self.assertContains(response, "Limpar arquivos")
+        self.assertContains(response, 'id="minimize-upload-panel"')
+        self.assertContains(response, 'id="open-upload-panel"')
+        self.assertContains(response, 'id="filter-panel"')
+        self.assertContains(response, 'data-filter-field="collision_1y_met"')
+        self.assertContains(response, 'data-filter-field="collision_3y_met"')
+        self.assertContains(response, 'data-filter-field="pedestrian_1y_met"')
+        self.assertContains(response, 'data-filter-field="pedestrian_3y_met"')
+        self.assertContains(response, 'id="clear-filters-button"')
+        self.assertContains(response, 'id="minimize-filter-panel"')
+        self.assertContains(response, 'id="open-filter-panel"')
 
     @patch("accidents.views.build_map_data")
     @patch("accidents.views.process_accidents")

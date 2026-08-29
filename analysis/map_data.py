@@ -11,6 +11,10 @@ MAP_COLUMNS = [
     "pedestrians_1y",
     "collisions_3y",
     "pedestrians_3y",
+    "collision_1y_met",
+    "collision_3y_met",
+    "pedestrian_1y_met",
+    "pedestrian_3y_met",
     "collision_criterion",
     "pedestrian_criterion",
     "criterion",
@@ -54,6 +58,10 @@ def build_map_data(results: pd.DataFrame) -> list[dict]:
             "pedestrians_1y": int(row["pedestrians_1y"]),
             "collisions_3y": int(row["collisions_3y"]),
             "pedestrians_3y": int(row["pedestrians_3y"]),
+            "collision_1y_met": bool(row["collision_1y_met"]),
+            "collision_3y_met": bool(row["collision_3y_met"]),
+            "pedestrian_1y_met": bool(row["pedestrian_1y_met"]),
+            "pedestrian_3y_met": bool(row["pedestrian_3y_met"]),
             "collision_criterion": bool(
                 row["collision_criterion"]
             ),
