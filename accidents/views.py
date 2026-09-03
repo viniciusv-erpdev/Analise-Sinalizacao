@@ -6,6 +6,7 @@ from accidents.services import (
 )
 from analysis.map_data import build_map_data
 from analysis.pipeline import process_accidents
+from signaling.services import get_signaling_map_data
 
 
 def analysis_view(request):
@@ -40,6 +41,7 @@ def analysis_view(request):
     context = {
         "results": results,
         "map_data": map_data,
+        "signaling_map_data": get_signaling_map_data(),
         "import_error": import_error,
         "import_summary": import_summary,
         "initial_tool_tab": (

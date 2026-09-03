@@ -2,7 +2,7 @@ from unittest.mock import patch
 
 import pandas as pd
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.test import SimpleTestCase
+from django.test import SimpleTestCase, TestCase
 
 from accidents.services import (
     AccidentImportError,
@@ -322,7 +322,7 @@ class HistoricalCriteriaTests(SimpleTestCase):
         self.assertFalse(cluster["pedestrian_3y_met"])
         self.assertFalse(cluster["eligible"])
 
-class AnalysisViewTests(SimpleTestCase):
+class AnalysisViewTests(TestCase):
     map_data = [
         {
             "cluster_id": 7,
