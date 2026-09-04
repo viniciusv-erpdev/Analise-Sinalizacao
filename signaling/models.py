@@ -67,6 +67,7 @@ class SignalingIntervention(models.Model):
     )
     type = models.CharField(max_length=30, choices=Type.choices)
     condition = models.CharField(max_length=6, choices=Condition.choices)
+    notes = models.TextField(blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

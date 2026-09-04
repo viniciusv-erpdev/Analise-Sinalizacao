@@ -295,6 +295,19 @@ function buildInterventionList(point) {
                             alt=""
                         >
                     </button>
+                    <button
+                        class="signaling-intervention__notes"
+                        type="button"
+                        data-read-intervention-notes="${intervention.id}"
+                        title="Ver observações"
+                        aria-label="Ver observações da intervenção"
+                    >
+                        <img
+                            class="signaling-notes-icon"
+                            src="${signalingConfig.dataset.notesIconUrl}"
+                            alt=""
+                        >
+                    </button>
                 </span>
             </li>
         `;
@@ -335,6 +348,19 @@ function buildExistingPointPopup(point) {
             </div>
             <h3 class="signaling-popup__heading">Intervenções</h3>
             ${buildInterventionList(point)}
+            <section class="signaling-notes-panel" data-notes-panel hidden>
+                <header class="signaling-notes-panel__header">
+                    <strong>Observações</strong>
+                    <button
+                        class="signaling-notes-panel__close"
+                        type="button"
+                        data-close-notes
+                        title="Fechar observações"
+                        aria-label="Fechar observações"
+                    >&times;</button>
+                </header>
+                <p class="signaling-notes-panel__content" data-notes-content></p>
+            </section>
             <div class="d-grid gap-2 mt-2">
                 <button
                     class="btn btn-primary btn-sm"
@@ -437,6 +463,19 @@ function buildInterventionForm(point) {
             <p class="signaling-selection-summary text-secondary">
                 Selecionada: <strong data-selected-intervention>Nenhuma</strong>
             </p>
+            <div class="mb-3">
+                <label
+                    class="form-label small fw-semibold mb-1"
+                    for="intervention-notes-${point.id}"
+                >Observações</label>
+                <textarea
+                    class="form-control form-control-sm signaling-notes-input"
+                    id="intervention-notes-${point.id}"
+                    name="notes"
+                    rows="3"
+                    placeholder="Escreva observações se necessário..."
+                ></textarea>
+            </div>
             <fieldset class="mb-0">
                 <legend class="fs-6 mb-2">Condição</legend>
                 <div class="signaling-condition-options">
@@ -560,6 +599,35 @@ function showPointPopup(marker, point) {
             });
         });
 
+    const notesPanel = popupElement.querySelector("[data-notes-panel]");
+    const notesContent = popupElement.querySelector("[data-notes-content]");
+    popupElement.querySelectorAll("[data-read-intervention-notes]")
+        .forEach((button) => {
+            button.addEventListener("click", (event) => {
+                L.DomEvent.stopPropagation(event);
+                const interventionId = Number(
+                    button.dataset.readInterventionNotes
+                );
+                const intervention = point.interventions.find(
+                    (item) => item.id === interventionId
+                );
+                const notes = intervention && typeof intervention.notes === "string"
+                    ? intervention.notes
+                    : "";
+                notesContent.textContent = notes.trim()
+                    ? notes
+                    : "Nenhuma observação registrada";
+                notesPanel.hidden = false;
+            });
+        });
+
+    popupElement.querySelector("[data-close-notes]")
+        .addEventListener("click", (event) => {
+            L.DomEvent.stopPropagation(event);
+            notesPanel.hidden = true;
+            notesContent.textContent = "";
+        });
+
     const deleteButton = popupElement.querySelector(
         ".signaling-popup__delete"
     );
@@ -615,6 +683,7 @@ function wireInterventionForm(marker, point) {
 
     function resetFormSelection() {
         typeInput.value = "";
+        form.elements.notes.value = "";
         selectedIntervention.textContent = "Nenhuma";
         form.querySelectorAll("[data-intervention-type]").forEach((option) => {
             option.classList.remove("is-selected");
@@ -692,6 +761,7 @@ function wireInterventionForm(marker, point) {
                 {
                     type: formData.get("type"),
                     condition: formData.get("intervention-condition"),
+                    notes: formData.get("notes"),
                 }
             );
             point.interventions.push(intervention);

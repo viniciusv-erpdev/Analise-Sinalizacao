@@ -45,6 +45,7 @@ def _intervention_payload(
         "id": intervention.id,
         "type": intervention.type,
         "condition": intervention.condition,
+        "notes": intervention.notes,
     }
 
 
@@ -119,10 +120,18 @@ def save_intervention(request: HttpRequest, point_id: int) -> JsonResponse:
     if data is None:
         return JsonResponse({"error": "JSON inválido."}, status=400)
 
+    notes = data.get("notes", "")
+    if not isinstance(notes, str):
+        return JsonResponse(
+            {"errors": {"notes": ["A observação deve ser um texto."]}},
+            status=400,
+        )
+
     candidate = SignalingIntervention(
         signaling_point=point,
         type=data.get("type"),
         condition=data.get("condition"),
+        notes=notes,
     )
     try:
         candidate.full_clean(validate_constraints=False)

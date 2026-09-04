@@ -375,12 +375,18 @@ class SignalingInterventionEndpointTests(TestCase):
             args=[self.point.id],
         )
 
-    def post_intervention(self, intervention_type: str, condition: str):
+    def post_intervention(
+        self,
+        intervention_type: str,
+        condition: str,
+        notes: str = "",
+    ):
         return self.client.post(
             self.url,
             data=json.dumps({
                 "type": intervention_type,
                 "condition": condition,
+                "notes": notes,
             }),
             content_type="application/json",
         )
@@ -426,6 +432,7 @@ class SignalingInterventionEndpointTests(TestCase):
         response = self.post_intervention(
             SignalingIntervention.Type.TRAFFIC_LIGHT,
             SignalingIntervention.Condition.OK,
+            "Semáforo do lado norte.",
         )
 
         map_response = self.client.get(reverse("analysis"))
@@ -438,6 +445,79 @@ class SignalingInterventionEndpointTests(TestCase):
             intervention_data["type"],
             SignalingIntervention.Type.TRAFFIC_LIGHT,
         )
+        self.assertEqual(intervention_data["notes"], "Semáforo do lado norte.")
+
+    def test_creates_intervention_without_notes_field(self):
+        response = self.client.post(
+            self.url,
+            data=json.dumps({
+                "type": SignalingIntervention.Type.TRAFFIC_LIGHT,
+                "condition": SignalingIntervention.Condition.OK,
+            }),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.json()["notes"], "")
+        self.assertEqual(SignalingIntervention.objects.get().notes, "")
+
+    def test_creates_and_returns_intervention_with_notes(self):
+        notes = "Semáforo com visibilidade reduzida."
+
+        response = self.post_intervention(
+            SignalingIntervention.Type.TRAFFIC_LIGHT,
+            SignalingIntervention.Condition.OK,
+            notes,
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.json()["notes"], notes)
+        self.assertEqual(SignalingIntervention.objects.get().notes, notes)
+
+    def test_accepts_empty_notes(self):
+        response = self.post_intervention(
+            SignalingIntervention.Type.TRAFFIC_LIGHT,
+            SignalingIntervention.Condition.OK,
+            "",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.json()["notes"], "")
+
+    def test_same_type_interventions_keep_independent_notes(self):
+        first_response = self.post_intervention(
+            SignalingIntervention.Type.TRAFFIC_LIGHT,
+            SignalingIntervention.Condition.OK,
+            "Semáforo sentido norte",
+        )
+        second_response = self.post_intervention(
+            SignalingIntervention.Type.TRAFFIC_LIGHT,
+            SignalingIntervention.Condition.ABSENT,
+            "Lâmpada apagada",
+        )
+
+        self.assertNotEqual(first_response.json()["id"], second_response.json()["id"])
+        self.assertQuerySetEqual(
+            SignalingIntervention.objects.order_by("id").values_list(
+                "notes",
+                flat=True,
+            ),
+            ["Semáforo sentido norte", "Lâmpada apagada"],
+        )
+
+    def test_rejects_non_string_notes(self):
+        response = self.client.post(
+            self.url,
+            data=json.dumps({
+                "type": SignalingIntervention.Type.TRAFFIC_LIGHT,
+                "condition": SignalingIntervention.Condition.OK,
+                "notes": ["texto inválido"],
+            }),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("notes", response.json()["errors"])
 
     def test_creates_two_traffic_lights_for_same_point(self):
         first_response = self.post_intervention(
@@ -578,6 +658,7 @@ class SignalingInterventionEndpointTests(TestCase):
             signaling_point=self.point,
             type=SignalingIntervention.Type.TRAFFIC_LIGHT,
             condition=SignalingIntervention.Condition.OK,
+            notes="Observação removida junto com a intervenção.",
         )
         delete_url = reverse(
             "signaling:delete-intervention",

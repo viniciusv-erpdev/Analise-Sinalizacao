@@ -15,6 +15,7 @@ def get_signaling_map_data() -> list[dict[str, object]]:
                     "id": intervention.id,
                     "type": intervention.type,
                     "condition": intervention.condition,
+                    "notes": intervention.notes,
                 }
                 for intervention in point.interventions.all()
             ],
@@ -25,7 +26,7 @@ def get_signaling_map_data() -> list[dict[str, object]]:
             Prefetch(
                 "interventions",
                 queryset=SignalingIntervention.objects.only(
-                    "id", "signaling_point_id", "type", "condition"
+                    "id", "signaling_point_id", "type", "condition", "notes"
                 ).order_by("id"),
             )
         ).order_by("id")
