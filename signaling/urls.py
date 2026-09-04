@@ -32,4 +32,9 @@ urlpatterns = [
         views.update_intervention_condition,
         name="update-intervention-condition",
     ),
+    path(
+        "points/<int:point_id>/interventions/<int:intervention_id>/notes/",
+        views.update_intervention_notes,
+        name="update-intervention-notes",
+    ),
 ]

@@ -9,21 +9,21 @@ const signalingMarkers = new Map();
 const signalingStatuses = {
     OK: {
         label: "Completa",
-        popupLabel: "Sinalização completa",
+        popupLabel: "Intervenção completa",
         iconUrl: signalingConfig.dataset.adequateIconUrl,
         cssClass: "ok",
         buttonClass: "btn-outline-success",
     },
     INCOMPLETE: {
         label: "Incompleta",
-        popupLabel: "Sinalização incompleta",
+        popupLabel: "Intervenção incompleta",
         iconUrl: signalingConfig.dataset.inadequateIconUrl,
         cssClass: "incomplete",
         buttonClass: "btn-outline-warning",
     },
     ABSENT: {
         label: "Ausente",
-        popupLabel: "Sinalização ausente",
+        popupLabel: "Intervenção ausente",
         iconUrl: signalingConfig.dataset.removeIconUrl,
         cssClass: "absent",
         buttonClass: "btn-outline-danger",
@@ -228,6 +228,13 @@ function updateConditionUrl(pointId, interventionId) {
 }
 
 
+function updateNotesUrl(pointId, interventionId) {
+    return signalingConfig.dataset.updateNotesUrlTemplate
+        .replace("/0/", `/${pointId}/`)
+        .replace("/0/", `/${interventionId}/`);
+}
+
+
 function buildInterventionList(point) {
     if (point.interventions.length === 0) {
         return `
@@ -350,16 +357,49 @@ function buildExistingPointPopup(point) {
             ${buildInterventionList(point)}
             <section class="signaling-notes-panel" data-notes-panel hidden>
                 <header class="signaling-notes-panel__header">
-                    <strong>Observações</strong>
-                    <button
-                        class="signaling-notes-panel__close"
-                        type="button"
-                        data-close-notes
-                        title="Fechar observações"
-                        aria-label="Fechar observações"
-                    >&times;</button>
+                    <strong data-notes-panel-title>Observações</strong>
+                    <span class="signaling-notes-panel__actions">
+                        <button
+                            class="btn btn-link btn-sm text-secondary signaling-notes-panel__edit"
+                            type="button"
+                            data-edit-notes
+                        >Editar</button>
+                        <button
+                            class="signaling-notes-panel__close"
+                            type="button"
+                            data-close-notes
+                            title="Fechar observações"
+                            aria-label="Fechar observações"
+                        >&times;</button>
+                    </span>
                 </header>
-                <p class="signaling-notes-panel__content" data-notes-content></p>
+                <div data-notes-read-view>
+                    <p class="signaling-notes-panel__content" data-notes-content></p>
+                </div>
+                <form data-notes-edit-form hidden>
+                    <textarea
+                        class="form-control form-control-sm signaling-notes-panel__textarea"
+                        name="notes"
+                        rows="3"
+                        aria-label="Observações da intervenção"
+                    ></textarea>
+                    <p
+                        class="signaling-notes-panel__error"
+                        data-notes-error
+                        role="alert"
+                        hidden
+                    ></p>
+                    <div class="d-flex gap-2 mt-2">
+                        <button class="btn btn-success btn-sm" type="submit">
+                            Salvar
+                        </button>
+                        <button
+                            class="btn btn-outline-secondary btn-sm"
+                            type="button"
+                            data-cancel-notes
+                        >Cancelar</button>
+                    </div>
+                </form>
             </section>
             <div class="d-grid gap-2 mt-2">
                 <button
@@ -601,6 +641,28 @@ function showPointPopup(marker, point) {
 
     const notesPanel = popupElement.querySelector("[data-notes-panel]");
     const notesContent = popupElement.querySelector("[data-notes-content]");
+    const notesReadView = popupElement.querySelector("[data-notes-read-view]");
+    const notesEditForm = popupElement.querySelector("[data-notes-edit-form]");
+    const notesTextarea = notesEditForm.elements.notes;
+    const notesError = popupElement.querySelector("[data-notes-error]");
+    const notesTitle = popupElement.querySelector("[data-notes-panel-title]");
+    const editNotesButton = popupElement.querySelector("[data-edit-notes]");
+
+    function showNotesReadMode(intervention) {
+        const notes = typeof intervention.notes === "string"
+            ? intervention.notes
+            : "";
+        notesContent.textContent = notes.trim()
+            ? notes
+            : "Nenhuma observação registrada";
+        notesTitle.textContent = "Observações";
+        notesReadView.hidden = false;
+        notesEditForm.hidden = true;
+        editNotesButton.hidden = false;
+        notesError.hidden = true;
+        notesError.textContent = "";
+    }
+
     popupElement.querySelectorAll("[data-read-intervention-notes]")
         .forEach((button) => {
             button.addEventListener("click", (event) => {
@@ -611,21 +673,87 @@ function showPointPopup(marker, point) {
                 const intervention = point.interventions.find(
                     (item) => item.id === interventionId
                 );
-                const notes = intervention && typeof intervention.notes === "string"
-                    ? intervention.notes
-                    : "";
-                notesContent.textContent = notes.trim()
-                    ? notes
-                    : "Nenhuma observação registrada";
+                if (!intervention) {
+                    return;
+                }
+                notesPanel.dataset.interventionId = String(interventionId);
+                showNotesReadMode(intervention);
                 notesPanel.hidden = false;
             });
         });
+
+    editNotesButton.addEventListener("click", (event) => {
+        L.DomEvent.stopPropagation(event);
+        const interventionId = Number(notesPanel.dataset.interventionId);
+        const intervention = point.interventions.find(
+            (item) => item.id === interventionId
+        );
+        if (!intervention) {
+            return;
+        }
+        notesTextarea.value = typeof intervention.notes === "string"
+            ? intervention.notes
+            : "";
+        notesTitle.textContent = "Editar observações";
+        notesReadView.hidden = true;
+        notesEditForm.hidden = false;
+        editNotesButton.hidden = true;
+        notesError.hidden = true;
+        notesTextarea.focus();
+    });
+
+    popupElement.querySelector("[data-cancel-notes]")
+        .addEventListener("click", (event) => {
+            L.DomEvent.stopPropagation(event);
+            const interventionId = Number(notesPanel.dataset.interventionId);
+            const intervention = point.interventions.find(
+                (item) => item.id === interventionId
+            );
+            if (intervention) {
+                showNotesReadMode(intervention);
+            }
+        });
+
+    notesEditForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        L.DomEvent.stopPropagation(event);
+        const interventionId = Number(notesPanel.dataset.interventionId);
+        const interventionIndex = point.interventions.findIndex(
+            (item) => item.id === interventionId
+        );
+        if (interventionIndex === -1) {
+            return;
+        }
+
+        const submitButton = notesEditForm.querySelector('[type="submit"]');
+        const originalLabel = submitButton.textContent;
+        submitButton.disabled = true;
+        submitButton.textContent = "Salvando...";
+        notesError.hidden = true;
+
+        try {
+            const updatedIntervention = await postJson(
+                updateNotesUrl(point.id, interventionId),
+                {notes: notesTextarea.value}
+            );
+            point.interventions[interventionIndex] = updatedIntervention;
+            showNotesReadMode(updatedIntervention);
+        } catch (error) {
+            notesError.textContent = error.message;
+            notesError.hidden = false;
+        } finally {
+            submitButton.disabled = false;
+            submitButton.textContent = originalLabel;
+        }
+    });
 
     popupElement.querySelector("[data-close-notes]")
         .addEventListener("click", (event) => {
             L.DomEvent.stopPropagation(event);
             notesPanel.hidden = true;
             notesContent.textContent = "";
+            notesTextarea.value = "";
+            notesPanel.removeAttribute("data-intervention-id");
         });
 
     const deleteButton = popupElement.querySelector(

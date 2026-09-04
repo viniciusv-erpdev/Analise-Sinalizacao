@@ -405,6 +405,20 @@ class SignalingInterventionEndpointTests(TestCase):
             content_type="application/json",
         )
 
+    def update_notes(
+        self,
+        intervention: SignalingIntervention,
+        notes,
+    ):
+        return self.client.post(
+            reverse(
+                "signaling:update-intervention-notes",
+                args=[self.point.id, intervention.id],
+            ),
+            data=json.dumps({"notes": notes}),
+            content_type="application/json",
+        )
+
     def test_adds_traffic_light_with_ok_condition(self):
         response = self.post_intervention(
             SignalingIntervention.Type.TRAFFIC_LIGHT,
@@ -518,6 +532,115 @@ class SignalingInterventionEndpointTests(TestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertIn("notes", response.json()["errors"])
+
+    def test_updates_existing_notes(self):
+        intervention = SignalingIntervention.objects.create(
+            signaling_point=self.point,
+            type=SignalingIntervention.Type.TRAFFIC_LIGHT,
+            condition=SignalingIntervention.Condition.OK,
+            notes="Texto antigo",
+        )
+
+        response = self.update_notes(intervention, "Texto novo")
+
+        intervention.refresh_from_db()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["notes"], "Texto novo")
+        self.assertEqual(intervention.notes, "Texto novo")
+
+    def test_clears_existing_notes(self):
+        intervention = SignalingIntervention.objects.create(
+            signaling_point=self.point,
+            type=SignalingIntervention.Type.TRAFFIC_LIGHT,
+            condition=SignalingIntervention.Condition.OK,
+            notes="Texto que será removido",
+        )
+
+        response = self.update_notes(intervention, "")
+
+        intervention.refresh_from_db()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(intervention.notes, "")
+
+    def test_updating_notes_does_not_change_other_intervention(self):
+        intervention = SignalingIntervention.objects.create(
+            signaling_point=self.point,
+            type=SignalingIntervention.Type.TRAFFIC_LIGHT,
+            condition=SignalingIntervention.Condition.OK,
+            notes="Sentido norte",
+        )
+        other_intervention = SignalingIntervention.objects.create(
+            signaling_point=self.point,
+            type=SignalingIntervention.Type.TRAFFIC_LIGHT,
+            condition=SignalingIntervention.Condition.ABSENT,
+            notes="Sentido sul",
+        )
+
+        self.update_notes(intervention, "Nova observação do sentido norte")
+
+        other_intervention.refresh_from_db()
+        self.assertEqual(other_intervention.notes, "Sentido sul")
+
+    def test_notes_update_preserves_type_condition_and_point(self):
+        intervention = SignalingIntervention.objects.create(
+            signaling_point=self.point,
+            type=SignalingIntervention.Type.SPEED_BUMP,
+            condition=SignalingIntervention.Condition.ABSENT,
+            notes="Antes",
+        )
+
+        self.update_notes(intervention, "Depois")
+
+        intervention.refresh_from_db()
+        self.assertEqual(intervention.signaling_point, self.point)
+        self.assertEqual(intervention.type, SignalingIntervention.Type.SPEED_BUMP)
+        self.assertEqual(
+            intervention.condition,
+            SignalingIntervention.Condition.ABSENT,
+        )
+
+    def test_rejects_invalid_notes_update_payload(self):
+        intervention = SignalingIntervention.objects.create(
+            signaling_point=self.point,
+            type=SignalingIntervention.Type.TRAFFIC_LIGHT,
+            condition=SignalingIntervention.Condition.OK,
+        )
+
+        response = self.update_notes(intervention, {"invalid": "value"})
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("notes", response.json()["errors"])
+
+    def test_returns_not_found_when_updating_notes_of_missing_intervention(self):
+        response = self.client.post(
+            reverse(
+                "signaling:update-intervention-notes",
+                args=[self.point.id, 999],
+            ),
+            data=json.dumps({"notes": "Novo texto"}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_updated_notes_persist_in_later_map_query(self):
+        intervention = SignalingIntervention.objects.create(
+            signaling_point=self.point,
+            type=SignalingIntervention.Type.TRAFFIC_LIGHT,
+            condition=SignalingIntervention.Condition.OK,
+            notes="Antes",
+        )
+        self.update_notes(intervention, "Persistida depois da edição")
+
+        map_response = self.client.get(reverse("analysis"))
+
+        intervention_data = map_response.context["signaling_map_data"][0][
+            "interventions"
+        ][0]
+        self.assertEqual(
+            intervention_data["notes"],
+            "Persistida depois da edição",
+        )
 
     def test_creates_two_traffic_lights_for_same_point(self):
         first_response = self.post_intervention(

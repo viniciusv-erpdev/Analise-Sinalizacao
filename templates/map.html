@@ -514,6 +514,18 @@
             margin-bottom: 6px;
         }
 
+        .signaling-notes-panel__actions {
+            display: inline-flex;
+            gap: 4px;
+            align-items: center;
+        }
+
+        .signaling-notes-panel__edit {
+            padding: 2px 6px;
+            font-size: 12px;
+            line-height: 1.25;
+        }
+
         .signaling-notes-panel__close {
             width: 28px;
             height: 28px;
@@ -537,6 +549,17 @@
             overflow-y: auto;
             overflow-wrap: anywhere;
             white-space: pre-wrap;
+            font-size: 12px;
+        }
+
+        .signaling-notes-panel__textarea {
+            max-height: 130px;
+            resize: vertical;
+        }
+
+        .signaling-notes-panel__error {
+            margin: 6px 0 0;
+            color: #b02a37;
             font-size: 12px;
         }
 
@@ -1218,6 +1241,7 @@
         data-intervention-url-template="{% url 'signaling:save-intervention' 0 %}"
         data-delete-intervention-url-template="{% url 'signaling:delete-intervention' 0 0 %}"
         data-update-condition-url-template="{% url 'signaling:update-intervention-condition' 0 0 %}"
+        data-update-notes-url-template="{% url 'signaling:update-intervention-notes' 0 0 %}"
         data-traffic-light-icon-url="{% static 'icons/signaling/traffic-light.svg' %}"
         data-adequate-icon-url="{% static 'icons/signaling/adequate-signal-icon.svg' %}"
         data-inadequate-icon-url="{% static 'icons/signaling/inadequate-signal-icon.svg' %}"

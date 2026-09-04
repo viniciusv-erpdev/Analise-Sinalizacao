@@ -186,3 +186,30 @@ def update_intervention_condition(
 
     intervention.save(update_fields=["condition", "updated_at"])
     return JsonResponse(_intervention_payload(intervention))
+
+
+@require_POST
+def update_intervention_notes(
+    request: HttpRequest,
+    point_id: int,
+    intervention_id: int,
+) -> JsonResponse:
+    intervention = get_object_or_404(
+        SignalingIntervention,
+        pk=intervention_id,
+        signaling_point_id=point_id,
+    )
+    data = _read_json(request)
+    if data is None:
+        return JsonResponse({"error": "JSON inválido."}, status=400)
+
+    notes = data.get("notes")
+    if not isinstance(notes, str):
+        return JsonResponse(
+            {"errors": {"notes": ["A observação deve ser um texto."]}},
+            status=400,
+        )
+
+    intervention.notes = notes
+    intervention.save(update_fields=["notes", "updated_at"])
+    return JsonResponse(_intervention_payload(intervention))
