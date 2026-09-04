@@ -93,6 +93,26 @@ def delete_point(request: HttpRequest, point_id: int) -> JsonResponse:
 
 
 @require_POST
+def update_point_status(request: HttpRequest, point_id: int) -> JsonResponse:
+    point = get_object_or_404(SignalingPoint, pk=point_id)
+    data = _read_json(request)
+    if data is None:
+        return JsonResponse({"error": "JSON inválido."}, status=400)
+
+    point.status = data.get("status")
+    try:
+        point.full_clean()
+    except ValidationError as error:
+        return JsonResponse(
+            {"errors": _validation_errors(error)},
+            status=400,
+        )
+
+    point.save(update_fields=["status", "updated_at"])
+    return JsonResponse({"id": point.id, "status": point.status})
+
+
+@require_POST
 def save_intervention(request: HttpRequest, point_id: int) -> JsonResponse:
     point = get_object_or_404(SignalingPoint, pk=point_id)
     data = _read_json(request)
@@ -112,15 +132,8 @@ def save_intervention(request: HttpRequest, point_id: int) -> JsonResponse:
             status=400,
         )
 
-    intervention, created = SignalingIntervention.objects.update_or_create(
-        signaling_point=point,
-        type=candidate.type,
-        defaults={"condition": candidate.condition},
-    )
-    return JsonResponse(
-        _intervention_payload(intervention),
-        status=201 if created else 200,
-    )
+    candidate.save()
+    return JsonResponse(_intervention_payload(candidate), status=201)
 
 
 @require_POST
@@ -136,3 +149,31 @@ def delete_intervention(
     )
     intervention.delete()
     return JsonResponse({"deleted": True, "id": intervention_id})
+
+
+@require_POST
+def update_intervention_condition(
+    request: HttpRequest,
+    point_id: int,
+    intervention_id: int,
+) -> JsonResponse:
+    intervention = get_object_or_404(
+        SignalingIntervention,
+        pk=intervention_id,
+        signaling_point_id=point_id,
+    )
+    data = _read_json(request)
+    if data is None:
+        return JsonResponse({"error": "JSON inválido."}, status=400)
+
+    intervention.condition = data.get("condition")
+    try:
+        intervention.full_clean()
+    except ValidationError as error:
+        return JsonResponse(
+            {"errors": _validation_errors(error)},
+            status=400,
+        )
+
+    intervention.save(update_fields=["condition", "updated_at"])
+    return JsonResponse(_intervention_payload(intervention))

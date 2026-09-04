@@ -131,7 +131,8 @@
 
         .signaling-popup {
             min-width: 190px;
-            max-width: 280px;
+            width: min(350px, calc(100vw - 80px));
+            max-width: 350px;
             color: #212529;
             font-family: Arial, sans-serif;
             line-height: 1.35;
@@ -140,6 +141,33 @@
         .signaling-popup h2 {
             margin: 0 0 10px;
             font-size: 15px;
+        }
+
+        .signaling-popup__header {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .signaling-popup__header h2 {
+            margin: 0;
+        }
+
+        .signaling-status-editor {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 5px;
+            margin-top: 8px;
+            padding: 7px;
+            border: 1px solid #dee2e6;
+            border-radius: 6px;
+            background: #f8f9fa;
+        }
+
+        .signaling-status-editor .btn {
+            flex: 1 1 calc(50% - 5px);
+            min-width: 0;
         }
 
         .signaling-popup .btn {
@@ -156,16 +184,47 @@
         }
 
         .signaling-interventions {
-            margin: 0 0 10px;
+            margin: 0;
             padding: 0;
             list-style: none;
         }
 
+        .signaling-interventions-panel {
+            max-height: 210px;
+            padding: 4px 7px;
+            overflow-y: auto;
+            border: 1px solid #dee2e6;
+            border-radius: 6px;
+            background: #fff;
+            scrollbar-width: thin;
+        }
+
         .signaling-intervention {
-            display: flex;
-            gap: 7px;
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) auto auto;
+            gap: 6px;
             align-items: center;
-            padding: 5px 0;
+            padding: 7px 0;
+            border-bottom: 1px solid #f1f3f5;
+        }
+
+        .signaling-intervention:last-child {
+            border-bottom: 0;
+        }
+
+        .signaling-intervention__type,
+        .signaling-intervention__actions {
+            display: flex;
+            gap: 6px;
+            align-items: center;
+        }
+
+        .signaling-intervention__type {
+            min-width: 0;
+        }
+
+        .signaling-intervention__type-name {
+            overflow-wrap: anywhere;
         }
 
         .signaling-intervention__icon {
@@ -178,7 +237,6 @@
             display: inline-flex;
             gap: 4px;
             align-items: center;
-            margin-left: auto;
             white-space: nowrap;
         }
 
@@ -192,6 +250,34 @@
             width: 16px;
             height: 16px;
             object-fit: contain;
+        }
+
+        .signaling-toggle-icon {
+            width: 16px;
+            height: 16px;
+            object-fit: contain;
+        }
+
+        .signaling-intervention__toggle {
+            display: inline-flex;
+            width: 30px;
+            height: 30px;
+            padding: 7px;
+            align-items: center;
+            justify-content: center;
+            border: 0;
+            border-radius: 50%;
+            background: transparent;
+            cursor: pointer;
+        }
+
+        .signaling-intervention__toggle:hover {
+            background: rgba(255, 193, 7, 0.14);
+        }
+
+        .signaling-intervention__toggle:focus-visible {
+            outline: 2px solid #ffc107;
+            outline-offset: 2px;
         }
 
         .signaling-intervention__remove {
@@ -232,7 +318,7 @@
         }
 
         .signaling-popup__empty {
-            margin: 0 0 10px;
+            margin: 4px 0;
             color: #6c757d;
             font-size: 12px;
         }
@@ -252,13 +338,154 @@
             cursor: pointer;
         }
 
+        .signaling-catalog {
+            display: grid;
+            grid-template-columns: 30px minmax(0, 1fr) 30px;
+            gap: 5px;
+            align-items: stretch;
+        }
+
+        .signaling-catalog__viewport {
+            display: flex;
+            gap: 7px;
+            padding: 3px 2px 8px;
+            overflow-x: auto;
+            overscroll-behavior-x: contain;
+            scroll-behavior: smooth;
+            scroll-snap-type: x proximity;
+            scrollbar-width: thin;
+        }
+
+        .signaling-catalog__option {
+            position: relative;
+            display: flex;
+            flex: 0 0 82px;
+            min-height: 88px;
+            padding: 7px 5px;
+            flex-direction: column;
+            gap: 5px;
+            align-items: center;
+            justify-content: center;
+            border: 1px solid #ced4da;
+            border-radius: 6px;
+            background: #fff;
+            color: #212529;
+            cursor: pointer;
+            scroll-snap-align: start;
+            text-align: center;
+            transition: border-color 0.15s, background-color 0.15s, box-shadow 0.15s;
+        }
+
+        .signaling-catalog__option:hover {
+            border-color: #86b7fe;
+            background: #f8f9fa;
+        }
+
+        .signaling-catalog__option:focus-visible {
+            outline: 2px solid #0d6efd;
+            outline-offset: 2px;
+        }
+
+        .signaling-catalog__option.is-selected {
+            border: 2px solid #0d6efd;
+            background: #e7f1ff;
+            box-shadow: 0 1px 3px rgba(13, 110, 253, 0.22);
+        }
+
+        .signaling-catalog__option.is-selected::after {
+            position: absolute;
+            top: 3px;
+            right: 5px;
+            content: "\2713";
+            color: #0d6efd;
+            font-weight: 700;
+        }
+
+        .signaling-catalog__icon {
+            width: 34px;
+            height: 34px;
+            object-fit: contain;
+        }
+
+        .signaling-catalog__label {
+            max-width: 100%;
+            font-size: 11px;
+            line-height: 1.15;
+            overflow-wrap: anywhere;
+        }
+
+        .signaling-catalog__arrow {
+            align-self: center;
+            width: 30px;
+            height: 38px;
+            padding: 0;
+        }
+
+        .signaling-selection-summary {
+            min-height: 20px;
+            margin: 8px 0 10px;
+            font-size: 12px;
+        }
+
+        .signaling-condition-options {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 7px;
+        }
+
+        .signaling-condition-option {
+            display: inline-flex;
+            min-height: 38px;
+            gap: 5px;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .signaling-study-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+        }
+
+        .signaling-create-popup {
+            width: min(250px, calc(100vw - 100px));
+            max-width: 100%;
+        }
+
+        .signaling-study-actions .btn {
+            flex: 1 1 calc(50% - 6px);
+            min-width: 0;
+            padding-right: 7px;
+            padding-left: 7px;
+        }
+
+        .signaling-form-feedback {
+            margin: 8px 0 0;
+            padding: 6px 8px;
+            font-size: 12px;
+        }
+
         @media (max-width: 320px) {
             .signaling-intervention {
-                flex-wrap: wrap;
+                grid-template-columns: minmax(0, 1fr) auto;
             }
 
             .signaling-intervention__condition {
-                margin-left: 29px;
+                grid-column: 1;
+                margin-left: 28px;
+            }
+
+            .signaling-intervention__actions {
+                grid-column: 2;
+                grid-row: 1 / span 2;
+            }
+
+            .signaling-catalog {
+                grid-template-columns: minmax(0, 1fr);
+            }
+
+            .signaling-catalog__arrow {
+                display: none;
             }
         }
 
@@ -912,13 +1139,17 @@
         id="signaling-config"
         data-create-url="{% url 'signaling:create-point' %}"
         data-delete-url-template="{% url 'signaling:delete-point' 0 %}"
+        data-update-status-url-template="{% url 'signaling:update-point-status' 0 %}"
         data-intervention-url-template="{% url 'signaling:save-intervention' 0 %}"
         data-delete-intervention-url-template="{% url 'signaling:delete-intervention' 0 0 %}"
+        data-update-condition-url-template="{% url 'signaling:update-intervention-condition' 0 0 %}"
         data-traffic-light-icon-url="{% static 'icons/signaling/traffic-light.svg' %}"
         data-adequate-icon-url="{% static 'icons/signaling/adequate-signal-icon.svg' %}"
         data-inadequate-icon-url="{% static 'icons/signaling/inadequate-signal-icon.svg' %}"
         data-remove-icon-url="{% static 'icons/signaling/remove-signal-icon.svg' %}"
         data-delete-icon-url="{% static 'icons/signaling/delete-signal-icon.svg' %}"
+        data-toggle-icon-url="{% static 'icons/signaling/arrow-button.svg' %}"
+        data-intervention-icon-base-url="{% static 'icons/signaling/' %}"
         hidden
     ></div>
 

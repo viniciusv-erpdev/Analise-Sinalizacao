@@ -36,6 +36,86 @@ const signalingInterventionTypes = {
         label: "Semáforo",
         iconUrl: signalingConfig.dataset.trafficLightIconUrl,
     },
+    PEDESTRIAN_CROSSING: {
+        label: "Travessia segura",
+        iconUrl: `${signalingConfig.dataset.interventionIconBaseUrl}pedestrians-crossing-icon.svg`,
+    },
+    MINI_ROUNDABOUT: {
+        label: "Minirrotatória",
+        iconUrl: `${signalingConfig.dataset.interventionIconBaseUrl}rotatory-icon.svg`,
+    },
+    RIGHT_OF_WAY_REVERSAL: {
+        label: "Inversão de Pref. Passagem",
+        iconUrl: `${signalingConfig.dataset.interventionIconBaseUrl}reversal-right-of-way-icon.svg`,
+    },
+    TRAFFIC_FLOW_CHANGE: {
+        label: "Alteração de circulação",
+        iconUrl: `${signalingConfig.dataset.interventionIconBaseUrl}traffic-change-icon.svg`,
+    },
+    PEDESTRIAN_REFUGE: {
+        label: "Refúgios para pedestres",
+        iconUrl: `${signalingConfig.dataset.interventionIconBaseUrl}pedestrian-refuges-icon.svg`,
+    },
+    NO_PARKING: {
+        label: "Proibido estacionar",
+        iconUrl: `${signalingConfig.dataset.interventionIconBaseUrl}no-parking-icon.svg`,
+    },
+    GEOMETRY_ADJUSTMENT: {
+        label: "Adequação na geometria",
+        iconUrl: `${signalingConfig.dataset.interventionIconBaseUrl}geometry-icon.svg`,
+    },
+    SPEED_REDUCTION: {
+        label: "Redução de velocidade",
+        iconUrl: `${signalingConfig.dataset.interventionIconBaseUrl}speedometer-icon.svg`,
+    },
+    VERTICAL_HORIZONTAL_SIGNALING: {
+        label: "Sinalizações verticais e horizontais",
+        iconUrl: `${signalingConfig.dataset.interventionIconBaseUrl}signaling-icon.svg`,
+    },
+    LOW_VISIBILITY: {
+        label: "Visibilidade prejudicada",
+        iconUrl: `${signalingConfig.dataset.interventionIconBaseUrl}signal-low-vision.svg`,
+    },
+    R1: {
+        label: "R-1",
+        iconUrl: `${signalingConfig.dataset.interventionIconBaseUrl}signal-stop-icon.svg`,
+    },
+    STREET_LIGHTING: {
+        label: "Iluminação",
+        iconUrl: `${signalingConfig.dataset.interventionIconBaseUrl}street-ligth-icon.svg`,
+    },
+    SPEED_BUMP: {
+        label: "Lombada",
+        iconUrl: `${signalingConfig.dataset.interventionIconBaseUrl}signal-speed-bump.svg`,
+    },
+    R5A: {
+        label: "R-5a",
+        iconUrl: `${signalingConfig.dataset.interventionIconBaseUrl}R-5a-icon.svg`,
+    },
+    R5B: {
+        label: "R-5b",
+        iconUrl: `${signalingConfig.dataset.interventionIconBaseUrl}R-5b-icon.svg`,
+    },
+    R4A: {
+        label: "R-4a",
+        iconUrl: `${signalingConfig.dataset.interventionIconBaseUrl}R-4a-icon.svg`,
+    },
+    R24A: {
+        label: "R-24a",
+        iconUrl: `${signalingConfig.dataset.interventionIconBaseUrl}R-24a-icon.svg`,
+    },
+    R6C: {
+        label: "R-6c",
+        iconUrl: `${signalingConfig.dataset.interventionIconBaseUrl}R-6c-icon.svg`,
+    },
+    R6A: {
+        label: "R-6a",
+        iconUrl: `${signalingConfig.dataset.interventionIconBaseUrl}R-6a-icon.svg`,
+    },
+    RAISED_CROSSWALK: {
+        label: "Faixa elevada",
+        iconUrl: `${signalingConfig.dataset.interventionIconBaseUrl}raised-crosswalk-icon.svg`,
+    },
 };
 
 
@@ -43,10 +123,12 @@ const signalingConditions = {
     OK: {
         label: "Adequada",
         iconUrl: signalingConfig.dataset.adequateIconUrl,
+        buttonClass: "btn-outline-success",
     },
     ABSENT: {
         label: "Inadequada",
         iconUrl: signalingConfig.dataset.inadequateIconUrl,
+        buttonClass: "btn-outline-warning",
     },
 };
 
@@ -116,6 +198,14 @@ function deleteUrl(pointId) {
 }
 
 
+function updateStatusUrl(pointId) {
+    return signalingConfig.dataset.updateStatusUrlTemplate.replace(
+        "/0/",
+        `/${pointId}/`
+    );
+}
+
+
 function interventionUrl(pointId) {
     return signalingConfig.dataset.interventionUrlTemplate.replace(
         "/0/",
@@ -131,23 +221,42 @@ function deleteInterventionUrl(pointId, interventionId) {
 }
 
 
+function updateConditionUrl(pointId, interventionId) {
+    return signalingConfig.dataset.updateConditionUrlTemplate
+        .replace("/0/", `/${pointId}/`)
+        .replace("/0/", `/${interventionId}/`);
+}
+
+
 function buildInterventionList(point) {
     if (point.interventions.length === 0) {
-        return '<p class="signaling-popup__empty">Nenhuma sinalização cadastrada.</p>';
+        return `
+            <div class="signaling-interventions-panel">
+                <p class="signaling-popup__empty">Nenhuma sinalização cadastrada.</p>
+            </div>
+        `;
     }
 
     const items = point.interventions.map((intervention) => {
         const type = signalingInterventionTypes[intervention.type];
         const condition = signalingConditions[intervention.condition];
+        const nextCondition = intervention.condition === "OK" ? "ABSENT" : "OK";
+        const toggleLabel = nextCondition === "OK"
+            ? "Marcar como adequada"
+            : "Marcar como inadequada";
 
         return `
             <li class="signaling-intervention">
-                <img
-                    class="signaling-intervention__icon"
-                    src="${type.iconUrl}"
-                    alt=""
-                >
-                <span class="fw-semibold">${type.label}</span>
+                <span class="signaling-intervention__type">
+                    <img
+                        class="signaling-intervention__icon"
+                        src="${type.iconUrl}"
+                        alt=""
+                    >
+                    <span class="fw-semibold signaling-intervention__type-name">
+                        ${type.label}
+                    </span>
+                </span>
                 <span
                     class="signaling-intervention__condition small"
                 >
@@ -158,31 +267,72 @@ function buildInterventionList(point) {
                     >
                     ${condition.label}
                 </span>
-                <button
-                    class="signaling-intervention__remove"
-                    type="button"
-                    data-remove-intervention="${intervention.id}"
-                    title="Remover sinalização"
-                    aria-label="Remover sinalização"
-                >
-                    <img
-                        class="signaling-delete-icon"
-                        src="${signalingConfig.dataset.deleteIconUrl}"
-                        alt=""
+                <span class="signaling-intervention__actions">
+                    <button
+                        class="signaling-intervention__toggle"
+                        type="button"
+                        data-toggle-intervention="${intervention.id}"
+                        data-next-condition="${nextCondition}"
+                        title="${toggleLabel}"
+                        aria-label="${toggleLabel}"
                     >
-                </button>
+                        <img
+                            class="signaling-toggle-icon"
+                            src="${signalingConfig.dataset.toggleIconUrl}"
+                            alt=""
+                        >
+                    </button>
+                    <button
+                        class="signaling-intervention__remove"
+                        type="button"
+                        data-remove-intervention="${intervention.id}"
+                        title="Remover sinalização"
+                        aria-label="Remover sinalização"
+                    >
+                        <img
+                            class="signaling-delete-icon"
+                            src="${signalingConfig.dataset.deleteIconUrl}"
+                            alt=""
+                        >
+                    </button>
+                </span>
             </li>
         `;
     }).join("");
 
-    return `<ul class="signaling-interventions">${items}</ul>`;
+    return `
+        <div class="signaling-interventions-panel">
+            <ul class="signaling-interventions">${items}</ul>
+        </div>
+    `;
 }
 
 
 function buildExistingPointPopup(point) {
+    const statusOptions = Object.entries(signalingStatuses)
+        .map(([status, config]) => `
+            <button
+                class="btn ${config.buttonClass} btn-sm"
+                type="button"
+                data-point-status="${status}"
+                ${status === point.status ? "disabled" : ""}
+            >${config.label}</button>
+        `).join("");
+
     return `
         <article class="signaling-popup" data-signaling-point-id="${point.id}">
-            <h2>${signalingStatuses[point.status].popupLabel}</h2>
+            <header class="signaling-popup__header">
+                <h2>${signalingStatuses[point.status].popupLabel}</h2>
+                <button
+                    class="btn btn-outline-secondary btn-sm"
+                    type="button"
+                    data-edit-point-status
+                    aria-expanded="false"
+                >Alterar</button>
+            </header>
+            <div class="signaling-status-editor" data-status-editor hidden>
+                ${statusOptions}
+            </div>
             <h3 class="signaling-popup__heading">Intervenções</h3>
             ${buildInterventionList(point)}
             <div class="d-grid gap-2 mt-2">
@@ -206,50 +356,105 @@ function buildExistingPointPopup(point) {
 
 
 function buildInterventionForm(point) {
-    const existingIntervention = point.interventions[0] || null;
-    const selectedType = existingIntervention
-        ? existingIntervention.type
-        : Object.keys(signalingInterventionTypes)[0];
-    const typeConfig = signalingInterventionTypes[selectedType];
-    const selectedCondition = existingIntervention
-        ? existingIntervention.condition
-        : "OK";
+    const catalogOptions = Object.entries(signalingInterventionTypes)
+        .map(([value, config]) => `
+            <button
+                class="signaling-catalog__option"
+                type="button"
+                data-intervention-type="${value}"
+                aria-pressed="false"
+                title="${config.label}"
+            >
+                <img
+                    class="signaling-catalog__icon"
+                    src="${config.iconUrl}"
+                    alt=""
+                >
+                <span class="signaling-catalog__label">${config.label}</span>
+            </button>
+        `).join("");
     const conditionOptions = Object.entries(signalingConditions)
         .map(([value, config]) => `
-            <div class="form-check mb-1">
+            <div>
                 <input
-                    class="form-check-input"
+                    class="btn-check"
                     type="radio"
                     name="intervention-condition"
                     id="intervention-condition-${point.id}-${value}"
                     value="${value}"
-                    ${value === selectedCondition ? "checked" : ""}
+                    autocomplete="off"
                 >
                 <label
-                    class="form-check-label"
+                    class="btn ${config.buttonClass} btn-sm signaling-condition-option w-100"
                     for="intervention-condition-${point.id}-${value}"
-                >${config.label}</label>
+                >
+                    <img
+                        class="signaling-condition-icon"
+                        src="${config.iconUrl}"
+                        alt=""
+                    >
+                    ${config.label}
+                </label>
             </div>
         `).join("");
 
     return `
         <form class="signaling-popup signaling-intervention-form">
-            <h2>Dados 📈</h2>
-            <input type="hidden" name="type" value="${selectedType}">
-            <div class="signaling-intervention mb-2">
-                <img
-                    class="signaling-intervention__icon"
-                    src="${typeConfig.iconUrl}"
-                    alt=""
-                >
-                <strong>${typeConfig.label}</strong>
+            <div class="d-flex align-items-center justify-content-between gap-2 mb-2">
+                <h2 class="mb-0">Dados 📈</h2>
+                <button
+                    class="btn btn-outline-secondary btn-sm"
+                    type="button"
+                    data-back-to-signaling
+                >&larr; Voltar</button>
             </div>
+            <p class="small text-secondary mb-2">Adicionar intervenção</p>
+            <input type="hidden" name="type" value="">
+            <div class="signaling-catalog">
+                <button
+                    class="btn btn-outline-secondary btn-sm signaling-catalog__arrow"
+                    type="button"
+                    data-catalog-direction="previous"
+                    title="Intervenções anteriores"
+                    aria-label="Intervenções anteriores"
+                >&larr;</button>
+                <div
+                    class="signaling-catalog__viewport"
+                    data-intervention-catalog
+                    tabindex="0"
+                    aria-label="Tipos de intervenção"
+                >
+                    ${catalogOptions}
+                </div>
+                <button
+                    class="btn btn-outline-secondary btn-sm signaling-catalog__arrow"
+                    type="button"
+                    data-catalog-direction="next"
+                    title="Próximas intervenções"
+                    aria-label="Próximas intervenções"
+                >&rarr;</button>
+            </div>
+            <p class="signaling-selection-summary text-secondary">
+                Selecionada: <strong data-selected-intervention>Nenhuma</strong>
+            </p>
             <fieldset class="mb-0">
                 <legend class="fs-6 mb-2">Condição</legend>
-                ${conditionOptions}
+                <div class="signaling-condition-options">
+                    ${conditionOptions}
+                </div>
             </fieldset>
+            <div
+                class="alert alert-success signaling-form-feedback"
+                role="status"
+                data-intervention-feedback
+                hidden
+            ></div>
             <div class="d-flex gap-2 mt-3">
-                <button class="btn btn-success btn-sm flex-fill" type="submit">
+                <button
+                    class="btn btn-success btn-sm flex-fill"
+                    type="submit"
+                    disabled
+                >
                     Salvar
                 </button>
                 <button
@@ -267,6 +472,40 @@ function showPointPopup(marker, point) {
     marker.setPopupContent(buildExistingPointPopup(point));
     const popupElement = marker.getPopup().getElement();
     L.DomEvent.disableClickPropagation(popupElement);
+    L.DomEvent.disableScrollPropagation(popupElement);
+
+    const statusEditor = popupElement.querySelector("[data-status-editor]");
+    const editStatusButton = popupElement.querySelector(
+        "[data-edit-point-status]"
+    );
+    editStatusButton.addEventListener("click", (event) => {
+        L.DomEvent.stopPropagation(event);
+        statusEditor.hidden = !statusEditor.hidden;
+        editStatusButton.setAttribute(
+            "aria-expanded",
+            String(!statusEditor.hidden)
+        );
+    });
+
+    popupElement.querySelectorAll("[data-point-status]").forEach((button) => {
+        button.addEventListener("click", async (event) => {
+            L.DomEvent.stopPropagation(event);
+            button.disabled = true;
+            try {
+                const updatedPoint = await postJson(
+                    updateStatusUrl(point.id),
+                    {status: button.dataset.pointStatus}
+                );
+                point.status = updatedPoint.status;
+                marker.setIcon(createSignalingIcon(point.status));
+                marker.openPopup();
+                showPointPopup(marker, point);
+            } catch (error) {
+                button.disabled = false;
+                window.alert(error.message);
+            }
+        });
+    });
 
     popupElement.querySelector("[data-add-intervention]")
         .addEventListener("click", (event) => {
@@ -288,6 +527,31 @@ function showPointPopup(marker, point) {
                     point.interventions = point.interventions.filter(
                         (item) => item.id !== Number(button.dataset.removeIntervention)
                     );
+                    showPointPopup(marker, point);
+                } catch (error) {
+                    button.disabled = false;
+                    window.alert(error.message);
+                }
+            });
+        });
+
+    popupElement.querySelectorAll("[data-toggle-intervention]")
+        .forEach((button) => {
+            button.addEventListener("click", async (event) => {
+                L.DomEvent.stopPropagation(event);
+                button.disabled = true;
+                const interventionId = Number(
+                    button.dataset.toggleIntervention
+                );
+                try {
+                    const updatedIntervention = await postJson(
+                        updateConditionUrl(point.id, interventionId),
+                        {condition: button.dataset.nextCondition}
+                    );
+                    const interventionIndex = point.interventions.findIndex(
+                        (item) => item.id === interventionId
+                    );
+                    point.interventions[interventionIndex] = updatedIntervention;
                     showPointPopup(marker, point);
                 } catch (error) {
                     button.disabled = false;
@@ -327,12 +591,88 @@ function showPointPopup(marker, point) {
 function wireInterventionForm(marker, point) {
     const popupElement = marker.getPopup().getElement();
     const form = popupElement.querySelector(".signaling-intervention-form");
+    const typeInput = form.elements.type;
+    const conditionInputs = Array.from(
+        form.elements["intervention-condition"]
+    );
+    const submitButton = form.querySelector('[type="submit"]');
+    const selectedIntervention = form.querySelector(
+        "[data-selected-intervention]"
+    );
+    const feedback = form.querySelector("[data-intervention-feedback]");
+    const catalog = form.querySelector("[data-intervention-catalog]");
     L.DomEvent.disableClickPropagation(popupElement);
+    L.DomEvent.disableScrollPropagation(popupElement);
     form.addEventListener("click", (event) => {
         L.DomEvent.stopPropagation(event);
     });
 
+    function updateSubmitState() {
+        submitButton.disabled = !(
+            typeInput.value && conditionInputs.some((input) => input.checked)
+        );
+    }
+
+    function resetFormSelection() {
+        typeInput.value = "";
+        selectedIntervention.textContent = "Nenhuma";
+        form.querySelectorAll("[data-intervention-type]").forEach((option) => {
+            option.classList.remove("is-selected");
+            option.setAttribute("aria-pressed", "false");
+        });
+        conditionInputs.forEach((input) => {
+            input.checked = false;
+        });
+        updateSubmitState();
+    }
+
+    form.querySelectorAll("[data-intervention-type]").forEach((option) => {
+        option.addEventListener("click", (event) => {
+            L.DomEvent.stopPropagation(event);
+            form.querySelectorAll("[data-intervention-type]").forEach((item) => {
+                const isSelected = item === option;
+                item.classList.toggle("is-selected", isSelected);
+                item.setAttribute("aria-pressed", String(isSelected));
+            });
+            typeInput.value = option.dataset.interventionType;
+            selectedIntervention.textContent = (
+                signalingInterventionTypes[typeInput.value].label
+            );
+            feedback.hidden = true;
+            updateSubmitState();
+        });
+    });
+
+    conditionInputs.forEach((input) => {
+        input.addEventListener("change", () => {
+            feedback.hidden = true;
+            updateSubmitState();
+        });
+    });
+
+    form.querySelectorAll("[data-catalog-direction]").forEach((button) => {
+        button.addEventListener("click", (event) => {
+            L.DomEvent.stopPropagation(event);
+            const direction = button.dataset.catalogDirection === "next" ? 1 : -1;
+            catalog.scrollBy({left: direction * 260, behavior: "smooth"});
+        });
+    });
+
+    catalog.addEventListener("wheel", (event) => {
+        L.DomEvent.stopPropagation(event);
+        if (Math.abs(event.deltaY) > Math.abs(event.deltaX)) {
+            event.preventDefault();
+            catalog.scrollLeft += event.deltaY;
+        }
+    }, {passive: false});
+
     form.querySelector("[data-cancel-intervention]")
+        .addEventListener("click", (event) => {
+            L.DomEvent.stopPropagation(event);
+            showPointPopup(marker, point);
+        });
+
+    form.querySelector("[data-back-to-signaling]")
         .addEventListener("click", (event) => {
             L.DomEvent.stopPropagation(event);
             showPointPopup(marker, point);
@@ -341,8 +681,9 @@ function wireInterventionForm(marker, point) {
     form.addEventListener("submit", async (event) => {
         event.preventDefault();
         L.DomEvent.stopPropagation(event);
-        const submitButton = form.querySelector('[type="submit"]');
         const formData = new FormData(form);
+        const savedType = formData.get("type");
+        const savedCondition = formData.get("intervention-condition");
         submitButton.disabled = true;
 
         try {
@@ -353,17 +694,15 @@ function wireInterventionForm(marker, point) {
                     condition: formData.get("intervention-condition"),
                 }
             );
-            const existingIndex = point.interventions.findIndex(
-                (item) => item.type === intervention.type
+            point.interventions.push(intervention);
+            feedback.textContent = (
+                `${signalingInterventionTypes[savedType].label} — ` +
+                `${signalingConditions[savedCondition].label} adicionada.`
             );
-            if (existingIndex === -1) {
-                point.interventions.push(intervention);
-            } else {
-                point.interventions[existingIndex] = intervention;
-            }
-            showPointPopup(marker, point);
+            feedback.hidden = false;
+            resetFormSelection();
         } catch (error) {
-            submitButton.disabled = false;
+            updateSubmitState();
             window.alert(error.message);
         }
     });
@@ -376,7 +715,7 @@ function addSignalingMarker(point) {
     });
 
     point.interventions = point.interventions || [];
-    marker.bindPopup(buildExistingPointPopup(point));
+    marker.bindPopup(buildExistingPointPopup(point), {maxWidth: 390});
     marker.on("popupopen", () => showPointPopup(marker, point));
 
     marker.addTo(signalingLayer);
@@ -405,7 +744,7 @@ function buildCreationPopup() {
     return `
         <section class="signaling-popup signaling-create-popup">
             <h2>Estudo 📝</h2>
-            <div class="d-grid gap-2">
+            <div class="signaling-study-actions">
                 ${buttons}
                 <button
                     class="btn btn-outline-secondary btn-sm"

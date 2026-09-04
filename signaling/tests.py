@@ -2,7 +2,6 @@ from decimal import Decimal
 import json
 
 from django.core.exceptions import ValidationError
-from django.db import IntegrityError, transaction
 from django.test import TestCase
 from django.urls import reverse
 
@@ -288,6 +287,81 @@ class SignalingPointEndpointTests(TestCase):
         self.assertEqual(point_data["id"], create_response.json()["id"])
         self.assertEqual(point_data["status"], SignalingPoint.Status.INCOMPLETE)
 
+    def test_updates_ok_status_to_incomplete(self):
+        point = self.create_point()
+
+        response = self.post_json(
+            reverse("signaling:update-point-status", args=[point.id]),
+            {"status": SignalingPoint.Status.INCOMPLETE},
+        )
+
+        point.refresh_from_db()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(point.status, SignalingPoint.Status.INCOMPLETE)
+
+    def test_updates_incomplete_status_to_absent(self):
+        point = self.create_point()
+        point.status = SignalingPoint.Status.INCOMPLETE
+        point.save()
+
+        response = self.post_json(
+            reverse("signaling:update-point-status", args=[point.id]),
+            {"status": SignalingPoint.Status.ABSENT},
+        )
+
+        point.refresh_from_db()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(point.status, SignalingPoint.Status.ABSENT)
+
+    def test_updates_absent_status_to_ok(self):
+        point = self.create_point()
+        point.status = SignalingPoint.Status.ABSENT
+        point.save()
+
+        response = self.post_json(
+            reverse("signaling:update-point-status", args=[point.id]),
+            {"status": SignalingPoint.Status.OK},
+        )
+
+        point.refresh_from_db()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(point.status, SignalingPoint.Status.OK)
+
+    def test_rejects_invalid_point_status_update(self):
+        point = self.create_point()
+
+        response = self.post_json(
+            reverse("signaling:update-point-status", args=[point.id]),
+            {"status": "INVALID"},
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("status", response.json()["errors"])
+
+    def test_returns_not_found_when_updating_missing_point(self):
+        response = self.post_json(
+            reverse("signaling:update-point-status", args=[999]),
+            {"status": SignalingPoint.Status.OK},
+        )
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_updating_status_does_not_change_other_point(self):
+        point = self.create_point()
+        other_point = SignalingPoint.objects.create(
+            latitude=Decimal("-21.180000"),
+            longitude=Decimal("-47.820000"),
+            status=SignalingPoint.Status.ABSENT,
+        )
+
+        self.post_json(
+            reverse("signaling:update-point-status", args=[point.id]),
+            {"status": SignalingPoint.Status.INCOMPLETE},
+        )
+
+        other_point.refresh_from_db()
+        self.assertEqual(other_point.status, SignalingPoint.Status.ABSENT)
+
 
 class SignalingInterventionEndpointTests(TestCase):
     def setUp(self):
@@ -308,6 +382,20 @@ class SignalingInterventionEndpointTests(TestCase):
                 "type": intervention_type,
                 "condition": condition,
             }),
+            content_type="application/json",
+        )
+
+    def update_condition(
+        self,
+        intervention: SignalingIntervention,
+        condition: str,
+    ):
+        return self.client.post(
+            reverse(
+                "signaling:update-intervention-condition",
+                args=[self.point.id, intervention.id],
+            ),
+            data=json.dumps({"condition": condition}),
             content_type="application/json",
         )
 
@@ -351,56 +439,84 @@ class SignalingInterventionEndpointTests(TestCase):
             SignalingIntervention.Type.TRAFFIC_LIGHT,
         )
 
-    def test_database_constraint_prevents_duplicate_type_for_same_point(self):
-        SignalingIntervention.objects.create(
-            signaling_point=self.point,
-            type=SignalingIntervention.Type.TRAFFIC_LIGHT,
-            condition=SignalingIntervention.Condition.OK,
+    def test_creates_two_traffic_lights_for_same_point(self):
+        first_response = self.post_intervention(
+            SignalingIntervention.Type.TRAFFIC_LIGHT,
+            SignalingIntervention.Condition.OK,
+        )
+        second_response = self.post_intervention(
+            SignalingIntervention.Type.TRAFFIC_LIGHT,
+            SignalingIntervention.Condition.ABSENT,
         )
 
-        with self.assertRaises(IntegrityError), transaction.atomic():
-            SignalingIntervention.objects.create(
-                signaling_point=self.point,
-                type=SignalingIntervention.Type.TRAFFIC_LIGHT,
-                condition=SignalingIntervention.Condition.ABSENT,
+        self.assertEqual(first_response.status_code, 201)
+        self.assertEqual(second_response.status_code, 201)
+        self.assertNotEqual(first_response.json()["id"], second_response.json()["id"])
+        self.assertEqual(SignalingIntervention.objects.count(), 2)
+
+    def test_creates_two_traffic_lights_with_same_condition(self):
+        first_response = self.post_intervention(
+            SignalingIntervention.Type.TRAFFIC_LIGHT,
+            SignalingIntervention.Condition.OK,
+        )
+        second_response = self.post_intervention(
+            SignalingIntervention.Type.TRAFFIC_LIGHT,
+            SignalingIntervention.Condition.OK,
+        )
+
+        self.assertNotEqual(first_response.json()["id"], second_response.json()["id"])
+        self.assertEqual(SignalingIntervention.objects.count(), 2)
+
+    def test_creates_each_valid_intervention_type(self):
+        for intervention_type in SignalingIntervention.Type.values:
+            with self.subTest(intervention_type=intervention_type):
+                response = self.post_intervention(
+                    intervention_type,
+                    SignalingIntervention.Condition.OK,
+                )
+
+                self.assertEqual(response.status_code, 201)
+                self.assertEqual(response.json()["type"], intervention_type)
+
+        self.assertEqual(
+            SignalingIntervention.objects.count(),
+            len(SignalingIntervention.Type.values),
+        )
+
+    def test_creates_three_speed_bumps_with_different_ids(self):
+        responses = [
+            self.post_intervention(
+                SignalingIntervention.Type.SPEED_BUMP,
+                SignalingIntervention.Condition.OK,
+            )
+            for _ in range(3)
+        ]
+
+        intervention_ids = {response.json()["id"] for response in responses}
+        self.assertEqual(len(intervention_ids), 3)
+        self.assertEqual(
+            SignalingIntervention.objects.filter(
+                type=SignalingIntervention.Type.SPEED_BUMP,
+            ).count(),
+            3,
+        )
+
+    def test_different_types_coexist_on_same_point(self):
+        intervention_types = (
+            SignalingIntervention.Type.TRAFFIC_LIGHT,
+            SignalingIntervention.Type.SPEED_BUMP,
+            SignalingIntervention.Type.RAISED_CROSSWALK,
+        )
+
+        for intervention_type in intervention_types:
+            self.post_intervention(
+                intervention_type,
+                SignalingIntervention.Condition.OK,
             )
 
-    def test_updates_existing_intervention_instead_of_duplicating(self):
-        first_response = self.post_intervention(
-            SignalingIntervention.Type.TRAFFIC_LIGHT,
-            SignalingIntervention.Condition.OK,
-        )
-
-        update_response = self.post_intervention(
-            SignalingIntervention.Type.TRAFFIC_LIGHT,
-            SignalingIntervention.Condition.ABSENT,
-        )
-
-        self.assertEqual(update_response.status_code, 200)
-        self.assertEqual(update_response.json()["id"], first_response.json()["id"])
-        self.assertEqual(SignalingIntervention.objects.count(), 1)
-        self.assertEqual(
-            SignalingIntervention.objects.get().condition,
-            SignalingIntervention.Condition.ABSENT,
-        )
-
-    def test_updates_absent_intervention_to_ok(self):
-        first_response = self.post_intervention(
-            SignalingIntervention.Type.TRAFFIC_LIGHT,
-            SignalingIntervention.Condition.ABSENT,
-        )
-
-        update_response = self.post_intervention(
-            SignalingIntervention.Type.TRAFFIC_LIGHT,
-            SignalingIntervention.Condition.OK,
-        )
-
-        self.assertEqual(update_response.status_code, 200)
-        self.assertEqual(update_response.json()["id"], first_response.json()["id"])
-        self.assertEqual(SignalingIntervention.objects.count(), 1)
-        self.assertEqual(
-            SignalingIntervention.objects.get().condition,
-            SignalingIntervention.Condition.OK,
+        self.assertSetEqual(
+            set(self.point.interventions.values_list("type", flat=True)),
+            set(intervention_types),
         )
 
     def test_two_points_can_each_have_a_traffic_light(self):
@@ -473,3 +589,101 @@ class SignalingInterventionEndpointTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertFalse(SignalingIntervention.objects.exists())
         self.assertTrue(SignalingPoint.objects.filter(pk=self.point.pk).exists())
+
+    def test_deleting_one_of_three_keeps_the_other_two(self):
+        interventions = [
+            SignalingIntervention.objects.create(
+                signaling_point=self.point,
+                type=SignalingIntervention.Type.SPEED_BUMP,
+                condition=SignalingIntervention.Condition.OK,
+            )
+            for _ in range(3)
+        ]
+        delete_url = reverse(
+            "signaling:delete-intervention",
+            args=[self.point.id, interventions[1].id],
+        )
+
+        response = self.client.post(delete_url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertSetEqual(
+            set(self.point.interventions.values_list("id", flat=True)),
+            {interventions[0].id, interventions[2].id},
+        )
+
+    def test_updates_ok_condition_to_absent(self):
+        intervention = SignalingIntervention.objects.create(
+            signaling_point=self.point,
+            type=SignalingIntervention.Type.TRAFFIC_LIGHT,
+            condition=SignalingIntervention.Condition.OK,
+        )
+
+        response = self.update_condition(
+            intervention,
+            SignalingIntervention.Condition.ABSENT,
+        )
+
+        intervention.refresh_from_db()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(intervention.condition, SignalingIntervention.Condition.ABSENT)
+
+    def test_updates_absent_condition_to_ok(self):
+        intervention = SignalingIntervention.objects.create(
+            signaling_point=self.point,
+            type=SignalingIntervention.Type.TRAFFIC_LIGHT,
+            condition=SignalingIntervention.Condition.ABSENT,
+        )
+
+        response = self.update_condition(
+            intervention,
+            SignalingIntervention.Condition.OK,
+        )
+
+        intervention.refresh_from_db()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(intervention.condition, SignalingIntervention.Condition.OK)
+
+    def test_rejects_invalid_condition_update(self):
+        intervention = SignalingIntervention.objects.create(
+            signaling_point=self.point,
+            type=SignalingIntervention.Type.TRAFFIC_LIGHT,
+            condition=SignalingIntervention.Condition.OK,
+        )
+
+        response = self.update_condition(intervention, "INVALID")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("condition", response.json()["errors"])
+
+    def test_returns_not_found_when_updating_missing_intervention(self):
+        response = self.client.post(
+            reverse(
+                "signaling:update-intervention-condition",
+                args=[self.point.id, 999],
+            ),
+            data=json.dumps({"condition": SignalingIntervention.Condition.OK}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_updating_condition_does_not_change_other_intervention(self):
+        intervention = SignalingIntervention.objects.create(
+            signaling_point=self.point,
+            type=SignalingIntervention.Type.TRAFFIC_LIGHT,
+            condition=SignalingIntervention.Condition.OK,
+        )
+        other_intervention = SignalingIntervention.objects.create(
+            signaling_point=self.point,
+            type=SignalingIntervention.Type.TRAFFIC_LIGHT,
+            condition=SignalingIntervention.Condition.OK,
+        )
+
+        self.update_condition(
+            intervention,
+            SignalingIntervention.Condition.ABSENT,
+        )
+
+        other_intervention.refresh_from_db()
+        self.assertEqual(other_intervention.condition, SignalingIntervention.Condition.OK)
