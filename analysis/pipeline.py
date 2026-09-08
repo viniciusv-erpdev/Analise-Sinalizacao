@@ -41,8 +41,18 @@ MUNICIPALITY_PATH = (
     / "municipio.json"
 )
 
+INDIVIDUAL_RECORD_TYPES = {
+    "SINISTRO NAO FATAL",
+    "SINISTRO FATAL",
+}
+INDIVIDUAL_ROAD_TYPES = {
+    "VIAS URBANAS",
+    "NAO DISPONIVEL",
+}
 
-def process_accidents(df: pd.DataFrame) -> pd.DataFrame:
+
+def prepare_accidents(df: pd.DataFrame) -> pd.DataFrame:
+    """Normaliza e conserva apenas sinistros com coordenadas municipais válidas."""
 
     # ========================================================
     # NORMALIZAÇÃO
@@ -84,6 +94,30 @@ def process_accidents(df: pd.DataFrame) -> pd.DataFrame:
     valid_coordinates = ribeirao[
         ribeirao["coordinate_status"] == "VALID"
     ].copy()
+
+    return valid_coordinates
+
+
+def process_individual_accidents(df: pd.DataFrame) -> pd.DataFrame:
+    """Prepara sinistros individuais sem executar a análise por clusters."""
+    valid_accidents = prepare_accidents(df)
+    record_mask = valid_accidents["record_type"].isin(
+        INDIVIDUAL_RECORD_TYPES
+    )
+    road_mask = valid_accidents["road_type"].isin(
+        INDIVIDUAL_ROAD_TYPES
+    )
+    filtered = valid_accidents[record_mask & road_mask].copy()
+    filtered.attrs["individual_metrics"] = {
+        "received_count": len(df),
+        "valid_coordinate_count": len(valid_accidents),
+        "internal_filter_count": len(filtered),
+    }
+    return filtered
+
+
+def process_accidents(df: pd.DataFrame) -> pd.DataFrame:
+    valid_coordinates = prepare_accidents(df)
 
     # ========================================================
     # PONTOS DE OCORRÊNCIA

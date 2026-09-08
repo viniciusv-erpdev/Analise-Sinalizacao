@@ -4,10 +4,16 @@ from io import BytesIO
 import pandas as pd
 from django.core.files.uploadedfile import UploadedFile
 
-from accidents.normalizer import COLUMN_MAPPING
-
-
-REQUIRED_SOURCE_COLUMNS = set(COLUMN_MAPPING)
+REQUIRED_SOURCE_COLUMNS = {
+    "id_sinistro",
+    "data_sinistro",
+    "latitude",
+    "longitude",
+    "tp_sinistro_primario",
+    "logradouro",
+    "numero_logradouro",
+    "municipio",
+}
 
 
 class AccidentImportError(ValueError):

@@ -32,6 +32,10 @@
             --marker-collision: #6f42c1;
             --marker-pedestrian: #dc3545;
             --marker-both: #fd7e14;
+            --marker-individual-crash: #198754;
+            --marker-individual-collision: #0d6efd;
+            --marker-individual-unavailable: #ffc107;
+            --marker-individual-other: #0dcaf0;
         }
 
         html,
@@ -74,6 +78,33 @@
         .map-marker--both,
         .map-popup__category--both {
             --marker-color: var(--marker-both);
+        }
+
+        .map-marker--individual-pedestrian,
+        .map-popup__category--individual-pedestrian {
+            --marker-color: var(--marker-pedestrian);
+        }
+
+        .map-marker--individual-crash,
+        .map-popup__category--individual-crash {
+            --marker-color: var(--marker-individual-crash);
+        }
+
+        .map-marker--individual-collision,
+        .map-popup__category--individual-collision {
+            --marker-color: var(--marker-individual-collision);
+        }
+
+        .map-marker--individual-unavailable,
+        .map-popup__category--individual-unavailable {
+            --marker-color: var(--marker-individual-unavailable);
+            color: #212529;
+        }
+
+        .map-marker--individual-other,
+        .map-popup__category--individual-other {
+            --marker-color: var(--marker-individual-other);
+            color: #212529;
         }
 
         .signaling-marker {
@@ -663,6 +694,38 @@
             text-align: left;
         }
 
+        .map-popup__details {
+            display: grid;
+            grid-template-columns: auto minmax(0, 1fr);
+            gap: 5px 10px;
+            margin: 0;
+            font-size: 12px;
+        }
+
+        .map-popup__details dt {
+            color: #6c757d;
+            font-weight: 600;
+        }
+
+        .map-popup__details dd {
+            margin: 0;
+            overflow-wrap: anywhere;
+        }
+
+        .map-popup__modes {
+            width: 100%;
+            font-size: 12px;
+        }
+
+        .map-popup__modes td {
+            padding: 2px 0;
+        }
+
+        .map-popup__modes td:last-child {
+            text-align: right;
+            font-weight: 600;
+        }
+
         .map-legend {
             padding: 9px 11px;
             border-radius: 6px;
@@ -703,6 +766,12 @@
         .map-legend__dot--both {
             background: var(--marker-both);
         }
+
+        .map-legend__dot--individual-pedestrian { background: var(--marker-pedestrian); }
+        .map-legend__dot--individual-crash { background: var(--marker-individual-crash); }
+        .map-legend__dot--individual-collision { background: var(--marker-individual-collision); }
+        .map-legend__dot--individual-unavailable { background: var(--marker-individual-unavailable); }
+        .map-legend__dot--individual-other { background: var(--marker-individual-other); }
 
         .tools-panel {
             position: absolute;
@@ -794,6 +863,33 @@
             margin-right: 6px;
         }
 
+        .filter-option--category {
+            display: flex;
+            gap: 7px;
+            align-items: center;
+        }
+
+        .filter-category-dot {
+            width: 10px;
+            height: 10px;
+            flex: none;
+            border-radius: 50%;
+            background: var(--filter-category-color);
+            box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.2);
+        }
+
+        .filter-category-dot--pedestrian { --filter-category-color: var(--marker-pedestrian); }
+        .filter-category-dot--crash { --filter-category-color: var(--marker-individual-crash); }
+        .filter-category-dot--collision { --filter-category-color: var(--marker-individual-collision); }
+        .filter-category-dot--unavailable { --filter-category-color: var(--marker-individual-unavailable); }
+        .filter-category-dot--other { --filter-category-color: var(--marker-individual-other); }
+
+        .active-filter-summary {
+            margin: 12px 0 0;
+            color: #6c757d;
+            font-size: 12px;
+        }
+
         .filter-counter {
             margin: 12px 0 0;
             color: #495057;
@@ -851,6 +947,37 @@
             margin: 0 0 12px;
             color: #495057;
             line-height: 1.4;
+        }
+
+        .view-mode-options {
+            display: grid;
+            gap: 8px;
+            margin-bottom: 12px;
+        }
+
+        .view-mode-option {
+            display: block;
+            padding: 9px 10px;
+            border: 1px solid #ced4da;
+            border-radius: 6px;
+            cursor: pointer;
+        }
+
+        .btn-check:checked + .view-mode-option {
+            border-color: #0d6efd;
+            background: #eef5ff;
+            box-shadow: 0 0 0 1px #0d6efd;
+        }
+
+        .view-mode-option strong,
+        .view-mode-option small {
+            display: block;
+        }
+
+        .view-mode-option small {
+            margin-top: 2px;
+            color: #6c757d;
+            line-height: 1.3;
         }
 
         .file-input {
@@ -1071,7 +1198,7 @@
             <p
                 class="upload-intro"
             >
-                Selecione um ou mais CSVs para gerar os locais elegíveis.
+                Selecione um ou mais CSVs do Infosiga para visualizar no mapa.
             </p>
 
             <form
@@ -1080,6 +1207,37 @@
                 enctype="multipart/form-data"
             >
                 {% csrf_token %}
+
+                <fieldset class="mb-3">
+                    <legend class="fs-6 mb-2">Modo de visualização</legend>
+                    <div class="view-mode-options">
+                        <input
+                            class="btn-check"
+                            type="radio"
+                            name="view_mode"
+                            id="view-mode-clusters"
+                            value="clusters"
+                            {% if view_mode != 'individual' %}checked{% endif %}
+                        >
+                        <label class="view-mode-option" for="view-mode-clusters">
+                            <strong>Pontos elegíveis</strong>
+                            <small>Agrupa os sinistros e identifica locais que atendem aos critérios de intervenção do CONTRAN.</small>
+                        </label>
+
+                        <input
+                            class="btn-check"
+                            type="radio"
+                            name="view_mode"
+                            id="view-mode-individual"
+                            value="individual"
+                            {% if view_mode == 'individual' %}checked{% endif %}
+                        >
+                        <label class="view-mode-option" for="view-mode-individual">
+                            <strong>Todos os Sinistros</strong>
+                            <small>Exibe individualmente cada sinistro com coordenadas válidas.</small>
+                        </label>
+                    </div>
+                </fieldset>
 
                 <input
                     id="file-input"
@@ -1135,8 +1293,15 @@
                     <strong>Análise concluída</strong>
                     <ul class="upload-result-list">
                         <li>Arquivos: {{ import_summary.file_count }}</li>
-                        <li>Sinistros únicos: {{ import_summary.accident_count }}</li>
-                        <li>Locais elegíveis: {{ import_summary.eligible_count }}</li>
+                        {% if view_mode == 'individual' %}
+                            <li>Sinistros importados: {{ import_summary.accident_count }}</li>
+                            <li>Coordenadas válidas: {{ import_summary.valid_coordinate_count }}</li>
+                            <li>Após filtro interno: {{ import_summary.internal_filter_count }}</li>
+                            <li>Sinistros exibidos: {{ import_summary.displayed_count }}</li>
+                        {% else %}
+                            <li>Sinistros únicos: {{ import_summary.accident_count }}</li>
+                            <li>Locais elegíveis: {{ import_summary.eligible_count }}</li>
+                        {% endif %}
                     </ul>
                 </div>
             {% endif %}
@@ -1159,6 +1324,29 @@
             data-tools-tab-panel="filters"
             {% if initial_tool_tab != 'filters' %}hidden{% endif %}
         >
+            {% if view_mode == 'individual' %}
+                <p class="small text-secondary mb-2">
+                    Filtre os pontos por tipo de sinistro individual.
+                </p>
+                <fieldset class="filter-group">
+                    <legend>Filtrar sinistros</legend>
+                    {% for category, label in individual_filter_categories %}
+                        <label class="filter-option filter-option--category">
+                            <input
+                                type="checkbox"
+                                data-individual-category="{{ category }}"
+                                data-filter-label="{{ label }}"
+                            >
+                            <span class="filter-category-dot filter-category-dot--{{ category }}" aria-hidden="true"></span>
+                            <span>{{ label }}</span>
+                        </label>
+                    {% endfor %}
+                </fieldset>
+                <p class="active-filter-summary">
+                    <strong>Selecionados:</strong>
+                    <span id="active-filter-categories">Todas as categorias</span>
+                </p>
+            {% else %}
             <fieldset class="filter-group">
                 <legend>Colisões</legend>
 
@@ -1178,6 +1366,7 @@
                     7+ em 3 anos
                 </label>
             </fieldset>
+            {% endif %}
 
             <fieldset class="filter-group">
                 <legend>Atropelamentos</legend>
@@ -1204,7 +1393,7 @@
                 class="filter-counter"
                 aria-live="polite"
             >
-                0 de 0 locais exibidos
+                {% if view_mode == 'individual' %}0 de 0 sinistros exibidos{% else %}0 de 0 locais exibidos{% endif %}
             </p>
 
             <button
@@ -1231,6 +1420,7 @@
     </button>
 
     {{ map_data|json_script:"map-data" }}
+    {{ view_mode|json_script:"view-mode" }}
     {{ signaling_map_data|json_script:"signaling-map-data" }}
 
     <div

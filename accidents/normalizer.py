@@ -3,6 +3,7 @@ import pandas as pd
 
 COLUMN_MAPPING = {
     "id_sinistro": "id",
+    "tipo_registro": "record_type",
     "data_sinistro": "date",
     "latitude": "latitude",
     "longitude": "longitude",
@@ -10,7 +11,28 @@ COLUMN_MAPPING = {
     "logradouro": "street",
     "numero_logradouro": "street_number",
     "municipio": "city",
+    "tipo_via": "road_type",
+    "qtd_pedestre": "pedestrian_count",
+    "qtd_bicicleta": "bicycle_count",
+    "qtd_motocicleta": "motorcycle_count",
+    "qtd_automovel": "car_count",
+    "qtd_onibus": "bus_count",
+    "qtd_caminhao": "truck_count",
+    "qtd_veic_outros": "other_vehicle_count",
+    "qtd_veic_nao_disponivel": "unavailable_vehicle_count",
 }
+
+
+INDIVIDUAL_COUNT_COLUMNS = [
+    "pedestrian_count",
+    "bicycle_count",
+    "motorcycle_count",
+    "car_count",
+    "bus_count",
+    "truck_count",
+    "other_vehicle_count",
+    "unavailable_vehicle_count",
+]
 
 
 TYPE_MAPPING = {
@@ -29,6 +51,10 @@ def normalize(df: pd.DataFrame) -> pd.DataFrame:
     """
 
     df = df.rename(columns=COLUMN_MAPPING).copy()
+
+    for column in COLUMN_MAPPING.values():
+        if column not in df.columns:
+            df[column] = pd.NA
 
     # Data
     df["date"] = pd.to_datetime(
@@ -54,8 +80,23 @@ def normalize(df: pd.DataFrame) -> pd.DataFrame:
         df["accident_type"]
         .astype("string")
         .str.strip()
+        .str.upper()
+        .str.normalize("NFKD")
+        .str.encode("ascii", errors="ignore")
+        .str.decode("ascii")
         .map(TYPE_MAPPING)
     )
+
+    for column in ["record_type", "road_type"]:
+        df[column] = (
+            df[column]
+            .astype("string")
+            .str.strip()
+            .str.upper()
+            .str.normalize("NFKD")
+            .str.encode("ascii", errors="ignore")
+            .str.decode("ascii")
+        )
 
     # Logradouro
     df["street"] = (
@@ -81,9 +122,19 @@ def normalize(df: pd.DataFrame) -> pd.DataFrame:
     .astype("float64")
     )
 
+    for column in INDIVIDUAL_COUNT_COLUMNS:
+        df[column] = (
+            pd.to_numeric(df[column], errors="coerce")
+            .fillna(0)
+            .clip(lower=0)
+            .astype("int64")
+        )
+
     # Manter apenas as colunas necessárias
     columns = [
         "id",
+        "record_type",
+        "road_type",
         "date",
         "latitude",
         "longitude",
@@ -91,6 +142,7 @@ def normalize(df: pd.DataFrame) -> pd.DataFrame:
         "street",
         "street_number",
         "city",
+        *INDIVIDUAL_COUNT_COLUMNS,
     ]
 
     return df[columns]

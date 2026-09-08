@@ -17,13 +17,21 @@ L.tileLayer(
 const mapData = JSON.parse(
     document.getElementById("map-data").textContent
 );
+const viewMode = JSON.parse(
+    document.getElementById("view-mode").textContent
+);
 const markersLayer = L.layerGroup().addTo(map);
 const filterInputs = Array.from(
-    document.querySelectorAll("[data-filter-field]")
+    document.querySelectorAll(
+        "[data-filter-field], [data-individual-category]"
+    )
 );
 const filterCounter = document.getElementById("filter-counter");
 const clearFiltersButton = document.getElementById(
     "clear-filters-button"
+);
+const activeFilterCategories = document.getElementById(
+    "active-filter-categories"
 );
 
 
@@ -50,6 +58,17 @@ function getMarkerCategory(point) {
 function createMarkerIcon(category) {
     return L.divIcon({
         className: `map-marker map-marker--${category}`,
+        html: '<span class="map-marker__dot" aria-hidden="true"></span>',
+        iconSize: [18, 18],
+        iconAnchor: [9, 9],
+        popupAnchor: [0, -10],
+    });
+}
+
+
+function createIndividualMarkerIcon(category) {
+    return L.divIcon({
+        className: `map-marker map-marker--individual-${category}`,
         html: '<span class="map-marker__dot" aria-hidden="true"></span>',
         iconSize: [18, 18],
         iconAnchor: [9, 9],
@@ -156,18 +175,88 @@ function buildMarkerPopup(point, category) {
 }
 
 
+function appendDetail(list, label, value) {
+    const term = document.createElement("dt");
+    const description = document.createElement("dd");
+    term.textContent = label;
+    description.textContent = value;
+    list.append(term, description);
+}
+
+
+function buildIndividualMarkerPopup(point) {
+    const article = document.createElement("article");
+    article.className = "map-popup";
+
+    const title = document.createElement("h2");
+    title.className = "map-popup__title";
+    title.textContent = "Sinistro";
+
+    const category = document.createElement("span");
+    category.className = (
+        `map-popup__category map-popup__category--individual-${point.category}`
+    );
+    category.textContent = point.accident_type;
+
+    const details = document.createElement("dl");
+    details.className = "map-popup__details";
+    appendDetail(details, "Data", point.date);
+    appendDetail(details, "Tipo", point.accident_type);
+    appendDetail(details, "Gravidade", point.record_type);
+    appendDetail(details, "Local", point.street);
+
+    const modesSection = document.createElement("section");
+    modesSection.className = "map-popup__section";
+    const modesTitle = document.createElement("h3");
+    modesTitle.className = "map-popup__section-title";
+    modesTitle.textContent = "Modais envolvidos";
+    modesSection.append(modesTitle);
+
+    if (point.modes.length === 0) {
+        const empty = document.createElement("p");
+        empty.className = "small text-secondary mb-0";
+        empty.textContent = "Não disponível";
+        modesSection.append(empty);
+    } else {
+        const table = document.createElement("table");
+        table.className = "map-popup__modes";
+        const body = document.createElement("tbody");
+        point.modes.forEach((mode) => {
+            const row = document.createElement("tr");
+            const name = document.createElement("td");
+            const quantity = document.createElement("td");
+            name.textContent = mode.name;
+            quantity.textContent = String(mode.quantity);
+            row.append(name, quantity);
+            body.append(row);
+        });
+        table.append(body);
+        modesSection.append(table);
+    }
+
+    article.append(title, category, details, modesSection);
+    return article;
+}
+
+
 const markerRecords = mapData.map(point => {
-    const category = getMarkerCategory(point);
+    const category = viewMode === "individual"
+        ? point.category
+        : getMarkerCategory(point);
 
     const marker = L.marker([
         point.latitude,
         point.longitude
     ], {
-        icon: createMarkerIcon(category),
+        icon: viewMode === "individual"
+            ? createIndividualMarkerIcon(category)
+            : createMarkerIcon(category),
     });
 
     marker.bindPopup(
-        buildMarkerPopup(point, category),
+        viewMode === "individual"
+            ? buildIndividualMarkerPopup(point)
+            : buildMarkerPopup(point, category),
         {maxWidth: 320}
     );
 
@@ -181,6 +270,11 @@ function getActiveFilters() {
 
 
 function pointMatchesFilters(point, activeFilters) {
+    if (viewMode === "individual") {
+        return activeFilters.length === 0 || activeFilters.some(
+            (input) => point.category === input.dataset.individualCategory
+        );
+    }
     if (activeFilters.length === 0) {
         return true;
     }
@@ -205,9 +299,17 @@ function applyMapFilters() {
         }
     });
 
-    filterCounter.textContent = (
-        `${visibleCount} de ${markerRecords.length} locais exibidos`
-    );
+    filterCounter.textContent = viewMode === "individual"
+        ? `${visibleCount} de ${markerRecords.length} sinistros exibidos`
+        : `${visibleCount} de ${markerRecords.length} locais exibidos`;
+
+    if (viewMode === "individual" && activeFilterCategories) {
+        activeFilterCategories.textContent = activeFilters.length === 0
+            ? "Todas as categorias"
+            : activeFilters
+                .map((input) => input.dataset.filterLabel)
+                .join(" · ");
+    }
 }
 
 
@@ -225,20 +327,18 @@ function createMapLegend() {
     legend.onAdd = () => {
         const container = L.DomUtil.create("div", "map-legend");
 
-        container.innerHTML = `
+        container.innerHTML = viewMode === "individual" ? `
+            <strong>Sinistros</strong>
+            <div class="map-legend__item"><span class="map-legend__dot map-legend__dot--individual-pedestrian"></span>Atropelamento</div>
+            <div class="map-legend__item"><span class="map-legend__dot map-legend__dot--individual-crash"></span>Choque</div>
+            <div class="map-legend__item"><span class="map-legend__dot map-legend__dot--individual-collision"></span>Colisão</div>
+            <div class="map-legend__item"><span class="map-legend__dot map-legend__dot--individual-unavailable"></span>Não disponível</div>
+            <div class="map-legend__item"><span class="map-legend__dot map-legend__dot--individual-other"></span>Outros</div>
+        ` : `
             <strong>Legenda</strong>
-            <div class="map-legend__item">
-                <span class="map-legend__dot map-legend__dot--collision"></span>
-                Colisões
-            </div>
-            <div class="map-legend__item">
-                <span class="map-legend__dot map-legend__dot--pedestrian"></span>
-                Atropelamentos
-            </div>
-            <div class="map-legend__item">
-                <span class="map-legend__dot map-legend__dot--both"></span>
-                Ambos
-            </div>
+            <div class="map-legend__item"><span class="map-legend__dot map-legend__dot--collision"></span>Colisões</div>
+            <div class="map-legend__item"><span class="map-legend__dot map-legend__dot--pedestrian"></span>Atropelamentos</div>
+            <div class="map-legend__item"><span class="map-legend__dot map-legend__dot--both"></span>Ambos</div>
         `;
 
         L.DomEvent.disableClickPropagation(container);

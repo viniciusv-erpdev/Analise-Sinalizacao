@@ -12,8 +12,9 @@ from analysis.criteria import (
     evaluate_criteria,
     evaluate_historical_criteria,
 )
-from analysis.map_data import build_map_data
+from analysis.map_data import build_individual_map_data, build_map_data
 from analysis.pipeline import (
+    process_individual_accidents,
     process_accidents,
 )
 
@@ -27,6 +28,25 @@ SOURCE_COLUMNS = [
     "logradouro",
     "numero_logradouro",
     "municipio",
+]
+
+
+INDIVIDUAL_COLUMNS = [
+    "id",
+    "record_type",
+    "date",
+    "latitude",
+    "longitude",
+    "accident_type",
+    "street",
+    "pedestrian_count",
+    "bicycle_count",
+    "motorcycle_count",
+    "car_count",
+    "bus_count",
+    "truck_count",
+    "other_vehicle_count",
+    "unavailable_vehicle_count",
 ]
 
 
@@ -149,6 +169,181 @@ class PipelineTests(SimpleTestCase):
         self.assertEqual(len(result), 1)
         self.assertTrue(result.iloc[0]["eligible"])
         self.assertEqual(result.iloc[0]["collisions_1y"], 3)
+
+    @patch("analysis.pipeline.evaluate_historical_criteria")
+    @patch("analysis.pipeline.build_occurrence_points")
+    def test_individual_mode_skips_clusters_and_criteria(
+        self,
+        build_occurrence_points_mock,
+        evaluate_criteria_mock,
+    ):
+        dataframe = pd.DataFrame(
+            [[1, "31/07/2026", -21.1775, -47.8103, "COLISAO", "RUA A", 10, "RIBEIRAO PRETO"]],
+            columns=SOURCE_COLUMNS,
+        )
+        dataframe["tipo_registro"] = "SINISTRO NAO FATAL"
+        dataframe["tipo_via"] = "VIAS URBANAS"
+
+        with patch("analysis.pipeline.cluster_points") as cluster_points_mock:
+            result = process_individual_accidents(dataframe)
+
+        self.assertEqual(len(result), 1)
+        build_occurrence_points_mock.assert_not_called()
+        cluster_points_mock.assert_not_called()
+        evaluate_criteria_mock.assert_not_called()
+
+    def test_individual_mode_omits_invalid_coordinate(self):
+        dataframe = pd.DataFrame(
+            [[1, "31/07/2026", "invalid", -47.8103, "COLISAO", "RUA A", 10, "RIBEIRAO PRETO"]],
+            columns=SOURCE_COLUMNS,
+        )
+        dataframe["tipo_registro"] = "SINISTRO FATAL"
+        dataframe["tipo_via"] = "VIAS URBANAS"
+
+        result = process_individual_accidents(dataframe)
+
+        self.assertTrue(result.empty)
+
+    def test_individual_internal_filter_accepts_allowed_combinations(self):
+        prepared = pd.DataFrame({
+            "id": [1, 2, 3, 4],
+            "record_type": [
+                "SINISTRO NAO FATAL",
+                "SINISTRO FATAL",
+                "SINISTRO NAO FATAL",
+                "SINISTRO FATAL",
+            ],
+            "road_type": [
+                "VIAS URBANAS",
+                "VIAS URBANAS",
+                "NAO DISPONIVEL",
+                "NAO DISPONIVEL",
+            ],
+        })
+
+        with patch("analysis.pipeline.prepare_accidents", return_value=prepared):
+            result = process_individual_accidents(pd.DataFrame(index=range(4)))
+
+        self.assertEqual(result["id"].tolist(), [1, 2, 3, 4])
+
+    def test_individual_internal_filter_rejects_disallowed_combinations(self):
+        prepared = pd.DataFrame({
+            "id": [1, 2, 3, 4],
+            "record_type": [
+                "OUTRO REGISTRO",
+                "SINISTRO FATAL",
+                "SINISTRO NAO FATAL",
+                "OUTRO REGISTRO",
+            ],
+            "road_type": [
+                "VIAS URBANAS",
+                "RODOVIA",
+                "ESTRADAS E RODOVIAS",
+                "RODOVIA",
+            ],
+        })
+
+        with patch("analysis.pipeline.prepare_accidents", return_value=prepared):
+            result = process_individual_accidents(pd.DataFrame(index=range(4)))
+
+        self.assertTrue(result.empty)
+
+    def test_individual_internal_filter_uses_and_between_groups(self):
+        prepared = pd.DataFrame({
+            "id": [1, 2, 3],
+            "record_type": [
+                "SINISTRO FATAL",
+                "OUTRO REGISTRO",
+                "SINISTRO NAO FATAL",
+            ],
+            "road_type": ["RODOVIA", "VIAS URBANAS", "NAO DISPONIVEL"],
+        })
+
+        with patch("analysis.pipeline.prepare_accidents", return_value=prepared):
+            result = process_individual_accidents(pd.DataFrame(index=range(3)))
+
+        self.assertEqual(result["id"].tolist(), [3])
+
+
+class IndividualMapDataTests(SimpleTestCase):
+    def make_accidents(self, rows):
+        dataframe = pd.DataFrame(rows, columns=INDIVIDUAL_COLUMNS)
+        dataframe["date"] = pd.to_datetime(dataframe["date"], errors="coerce")
+        return dataframe
+
+    def test_valid_accident_generates_one_item_with_required_fields(self):
+        accidents = self.make_accidents([[
+            10, "SINISTRO NAO FATAL", "2025-05-14", -21.17, -47.81,
+            "COLISAO", "AV. PRESIDENTE VARGAS", 1, 0, 2, 1, 0, 0, 0, 0,
+        ]])
+
+        data = build_individual_map_data(accidents)
+
+        self.assertEqual(len(data), 1)
+        self.assertEqual(data[0]["date"], "14/05/2025")
+        self.assertEqual(data[0]["category"], "collision")
+        self.assertSetEqual(
+            set(data[0]),
+            {"id", "latitude", "longitude", "record_type", "date", "accident_type", "category", "street", "modes"},
+        )
+
+    def test_same_coordinates_remain_independent(self):
+        rows = [
+            [identifier, "NAO FATAL", "2025-05-14", -21.17, -47.81,
+             "COLISAO", "RUA A", 0, 0, 0, 1, 0, 0, 0, 0]
+            for identifier in (41, 42)
+        ]
+
+        data = build_individual_map_data(self.make_accidents(rows))
+
+        self.assertEqual([item["id"] for item in data], ["41", "42"])
+
+    def test_zero_and_nan_modes_are_omitted(self):
+        accidents = self.make_accidents([[
+            10, "NAO FATAL", None, -21.17, -47.81, "CHOQUE", "RUA A",
+            0, float("nan"), 2, 0, 0, 0, 0, 0,
+        ]])
+
+        data = build_individual_map_data(accidents)
+
+        self.assertEqual(data[0]["date"], "Não disponível")
+        self.assertEqual(data[0]["modes"], [{"name": "Motocicleta", "quantity": 2}])
+
+    def test_multiple_positive_modes_are_serialized(self):
+        accidents = self.make_accidents([[
+            10, "NAO FATAL", "2025-05-14", -21.17, -47.81,
+            "ATROPELAMENTO", "RUA A", 1, 1, 0, 2, 0, 0, 0, 0,
+        ]])
+
+        modes = build_individual_map_data(accidents)[0]["modes"]
+
+        self.assertEqual(modes, [
+            {"name": "Pedestre", "quantity": 1},
+            {"name": "Bicicleta", "quantity": 1},
+            {"name": "Automóvel", "quantity": 2},
+        ])
+
+    def test_categories_have_expected_visual_classification(self):
+        expected = {
+            "ATROPELAMENTO": "pedestrian",
+            "CHOQUE": "crash",
+            "COLISAO": "collision",
+            "NAO_DISPONIVEL": "unavailable",
+            "OUTRO": "other",
+            "TIPO INESPERADO": "other",
+        }
+        rows = [
+            [index, "NAO FATAL", "2025-05-14", -21.17, -47.81,
+             accident_type, "RUA A", 0, 0, 0, 0, 0, 0, 0, 0]
+            for index, accident_type in enumerate(expected, start=1)
+        ]
+
+        data = build_individual_map_data(self.make_accidents(rows))
+
+        self.assertEqual(
+            [item["category"] for item in data],
+            list(expected.values()),
+        )
 
 
 class MapFilterDataTests(SimpleTestCase):
@@ -399,6 +594,63 @@ class AnalysisViewTests(TestCase):
                 "eligible_count": 1,
             },
         )
+        self.assertEqual(response.context["view_mode"], "clusters")
+
+    @patch("accidents.views.build_individual_map_data")
+    @patch("accidents.views.process_individual_accidents")
+    @patch("accidents.views.process_accidents")
+    def test_individual_mode_uses_only_individual_pipeline(
+        self,
+        process_accidents_mock,
+        process_individual_mock,
+        build_individual_mock,
+    ):
+        individual_results = pd.DataFrame({"id": [1]})
+        individual_map_data = [{"id": "1", "latitude": -21.17, "longitude": -47.81}]
+        process_individual_mock.return_value = individual_results
+        build_individual_mock.return_value = individual_map_data
+        uploaded_file = make_upload(
+            "valid.csv",
+            [[1, "31/07/2026", -21.17, -47.81, "COLISAO", "RUA A", 10, "RIBEIRAO PRETO"]],
+        )
+
+        response = self.client.post(
+            "/",
+            {"files": uploaded_file, "view_mode": "individual"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        process_accidents_mock.assert_not_called()
+        process_individual_mock.assert_called_once()
+        build_individual_mock.assert_called_once_with(individual_results)
+        self.assertEqual(response.context["map_data"], individual_map_data)
+        self.assertEqual(response.context["view_mode"], "individual")
+        self.assertEqual(response.context["initial_tool_tab"], "data")
+        self.assertEqual(response.context["import_summary"]["displayed_count"], 1)
+        self.assertContains(response, "Filtre os pontos por tipo de sinistro individual")
+        self.assertContains(response, "data-individual-category", count=5)
+        self.assertNotContains(response, 'data-filter-field="collision_1y_met"')
+
+    @patch("accidents.views.process_individual_accidents")
+    @patch("accidents.views.process_accidents")
+    def test_rejects_unknown_view_mode(
+        self,
+        process_accidents_mock,
+        process_individual_mock,
+    ):
+        uploaded_file = make_upload(
+            "valid.csv",
+            [[1, "31/07/2026", -21.17, -47.81, "COLISAO", "RUA A", 10, "RIBEIRAO PRETO"]],
+        )
+
+        response = self.client.post(
+            "/",
+            {"files": uploaded_file, "view_mode": "unknown"},
+        )
+
+        self.assertContains(response, "Modo de visualização inválido")
+        process_accidents_mock.assert_not_called()
+        process_individual_mock.assert_not_called()
 
     @patch("accidents.views.build_map_data", return_value=[])
     @patch("accidents.views.process_accidents", return_value=pd.DataFrame())
