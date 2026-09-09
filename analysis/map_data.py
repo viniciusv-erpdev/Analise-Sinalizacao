@@ -131,43 +131,47 @@ def build_individual_map_data(accidents: pd.DataFrame) -> list[dict]:
     if missing:
         raise ValueError(f"Colunas obrigatórias ausentes: {missing}")
 
-    map_data = []
-    for _, row in accidents.iterrows():
-        type_label, category = INDIVIDUAL_TYPE_PRESENTATION.get(
-            row["accident_type"],
-            ("Outros", "other"),
-        )
-        modes = []
-        for column, label in INDIVIDUAL_MODE_COLUMNS.items():
-            quantity = _safe_quantity(row[column])
-            if quantity > 0:
-                modes.append({"name": label, "quantity": quantity})
-        date = row["date"]
-        street = row["street"]
-        record_type = row["record_type"]
+    return [
+        build_individual_accident_item(row)
+        for _, row in accidents.iterrows()
+    ]
 
-        map_data.append({
-            "id": str(row["id"]),
-            "latitude": float(row["latitude"]),
-            "longitude": float(row["longitude"]),
-            "record_type": (
-                "Não disponível"
-                if pd.isna(record_type) or not str(record_type).strip()
-                else str(record_type)
-            ),
-            "date": (
-                "Não disponível"
-                if pd.isna(date)
-                else date.strftime("%d/%m/%Y")
-            ),
-            "accident_type": type_label,
-            "category": category,
-            "street": (
-                "Não disponível"
-                if pd.isna(street) or not str(street).strip()
-                else str(street)
-            ),
-            "modes": modes,
-        })
 
-    return map_data
+def build_individual_accident_item(row: pd.Series) -> dict[str, object]:
+    """Serializa um sinistro individual normalizado."""
+    type_label, category = INDIVIDUAL_TYPE_PRESENTATION.get(
+        row["accident_type"],
+        ("Outros", "other"),
+    )
+    modes = []
+    for column, label in INDIVIDUAL_MODE_COLUMNS.items():
+        quantity = _safe_quantity(row[column])
+        if quantity > 0:
+            modes.append({"name": label, "quantity": quantity})
+    date = row["date"]
+    street = row["street"]
+    record_type = row["record_type"]
+
+    return {
+        "id": str(row["id"]),
+        "latitude": float(row["latitude"]),
+        "longitude": float(row["longitude"]),
+        "record_type": (
+            "Não disponível"
+            if pd.isna(record_type) or not str(record_type).strip()
+            else str(record_type)
+        ),
+        "date": (
+            "Não disponível"
+            if pd.isna(date)
+            else date.strftime("%d/%m/%Y")
+        ),
+        "accident_type": type_label,
+        "category": category,
+        "street": (
+            "Não disponível"
+            if pd.isna(street) or not str(street).strip()
+            else str(street)
+        ),
+        "modes": modes,
+    }

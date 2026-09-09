@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Relatório do local</title>
+    <link
+        rel="stylesheet"
+        href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css"
+        integrity="sha384-sRIl4kxILFvY47J16cr9ZwB07vP4J8+LH7qKQnuqkuIAvNWLzeN8tE5YBujZqJLB"
+        crossorigin="anonymous"
+    >
+    <style>
+        .report-container { max-width: 960px; }
+        .report-note { white-space: pre-wrap; overflow-wrap: anywhere; }
+        .report-accidents { max-height: 430px; overflow-y: auto; }
+    </style>
+</head>
+<body class="bg-light">
+    <main class="container report-container py-4">
+        <a
+            class="btn btn-outline-secondary btn-sm mb-3"
+            href="{% url 'analysis' %}"
+        >← Voltar ao mapa</a>
+
+        <h1 class="h3 mb-4">Relatório do local</h1>
+
+        {% if not survey %}
+            <div class="alert alert-info" role="status">
+                <h2 class="h5">Não há uma análise de sinistros individuais disponível.</h2>
+                <p class="mb-0">
+                    Carregue os arquivos no modo Todos os sinistros e tente novamente.
+                </p>
+            </div>
+        {% else %}
+            <section class="card shadow-sm mb-3">
+                <div class="card-body">
+                    <h2 class="h5 card-title">Resumo</h2>
+                    <dl class="row mb-0">
+                        <dt class="col-sm-7">Raio analisado</dt>
+                        <dd class="col-sm-5">{{ survey.radius_meters }} m</dd>
+                        <dt class="col-sm-7">Status da sinalização</dt>
+                        <dd class="col-sm-5">{{ survey.status.label }}</dd>
+                        <dt class="col-sm-7">Total de sinistros</dt>
+                        <dd class="col-sm-5">{{ survey.total_accidents }}</dd>
+                        <dt class="col-sm-7">Fatais</dt>
+                        <dd class="col-sm-5">{{ survey.summary.fatal }}</dd>
+                        <dt class="col-sm-7">Não fatais</dt>
+                        <dd class="col-sm-5">{{ survey.summary.non_fatal }}</dd>
+                    </dl>
+                </div>
+            </section>
+
+            <section class="card shadow-sm mb-3">
+                <div class="card-body">
+                    <h2 class="h5 card-title">Tipos de sinistro</h2>
+                    <ul class="list-group list-group-flush">
+                        {% for label, quantity in survey.summary.by_type.items %}
+                            <li class="list-group-item d-flex justify-content-between px-0">
+                                <span>{{ label }}</span>
+                                <strong>{{ quantity }}</strong>
+                            </li>
+                        {% endfor %}
+                    </ul>
+                </div>
+            </section>
+
+            <section class="card shadow-sm mb-3">
+                <div class="card-body">
+                    <h2 class="h5 card-title">Intervenções</h2>
+                    {% for intervention in survey.interventions %}
+                        <article class="border-bottom py-2">
+                            <strong>{{ intervention.type_label }} — {{ intervention.condition_label }}</strong>
+                            <p class="report-note small text-secondary mb-0">
+                                {% if intervention.notes %}{{ intervention.notes }}{% else %}Sem observações{% endif %}
+                            </p>
+                        </article>
+                    {% empty %}
+                        <p class="text-secondary mb-0">Nenhuma intervenção cadastrada.</p>
+                    {% endfor %}
+                </div>
+            </section>
+
+            <section class="card shadow-sm">
+                <div class="card-body">
+                    <h2 class="h5 card-title">Sinistros relacionados</h2>
+                    {% if survey.accidents %}
+                        <div class="table-responsive report-accidents">
+                            <table class="table table-sm table-striped align-middle mb-0">
+                                <thead class="position-sticky top-0 table-light">
+                                    <tr>
+                                        <th>ID</th><th>Data</th><th>Tipo</th><th>Gravidade</th>
+                                        <th>Local</th><th>Distância</th><th>Modais</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for accident in survey.accidents %}
+                                        <tr>
+                                            <td>{{ accident.id }}</td>
+                                            <td>{{ accident.date }}</td>
+                                            <td>{{ accident.accident_type }}</td>
+                                            <td>{{ accident.record_type }}</td>
+                                            <td>{{ accident.street }}</td>
+                                            <td>{{ accident.distance_meters|floatformat:1 }} m</td>
+                                            <td>
+                                                {% for mode in accident.modes %}
+                                                    <span class="d-block">{{ mode.name }}: {{ mode.quantity }}</span>
+                                                {% empty %}
+                                                    <span class="text-secondary">Não disponível</span>
+                                                {% endfor %}
+                                            </td>
+                                        </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    {% else %}
+                        <p class="text-secondary mb-0">
+                            Nenhum sinistro encontrado em um raio de {{ survey.radius_meters }} m.
+                        </p>
+                    {% endif %}
+                </div>
+            </section>
+        {% endif %}
+    </main>
+</body>
+</html>

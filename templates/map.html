@@ -1425,10 +1425,10 @@
     {{ map_data|json_script:"map-data" }}
     {{ view_mode|json_script:"view-mode" }}
     {{ signaling_map_data|json_script:"signaling-map-data" }}
-
     <div
         id="signaling-config"
         data-create-url="{% url 'signaling:create-point' %}"
+        data-report-url-template="{% url 'signaling:point-report' 0 %}"
         data-delete-url-template="{% url 'signaling:delete-point' 0 %}"
         data-update-status-url-template="{% url 'signaling:update-point-status' 0 %}"
         data-intervention-url-template="{% url 'signaling:save-intervention' 0 %}"
@@ -1443,6 +1443,7 @@
         data-toggle-icon-url="{% static 'icons/signaling/arrow-button.svg' %}"
         data-notes-icon-url="{% static 'icons/signaling/text-read-icon.svg' %}"
         data-intervention-icon-base-url="{% static 'icons/signaling/' %}"
+        data-has-individual-analysis="{% if has_individual_analysis %}true{% else %}false{% endif %}"
         hidden
     ></div>
 

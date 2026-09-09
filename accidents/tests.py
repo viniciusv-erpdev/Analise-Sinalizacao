@@ -3,6 +3,7 @@ from unittest.mock import patch
 import pandas as pd
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import SimpleTestCase, TestCase
+from django.urls import reverse
 
 from accidents.services import (
     AccidentImportError,
@@ -17,6 +18,7 @@ from analysis.pipeline import (
     process_individual_accidents,
     process_accidents,
 )
+from signaling.surveys import ANALYSIS_SESSION_KEY
 
 
 SOURCE_COLUMNS = [
@@ -555,6 +557,8 @@ class AnalysisViewTests(TestCase):
         self.assertContains(response, 'id="minimize-tools-panel"')
         self.assertContains(response, 'id="open-tools-panel"')
         self.assertContains(response, 'data-has-active-analysis="false"')
+        self.assertFalse(response.context["has_individual_analysis"])
+        self.assertContains(response, 'data-has-individual-analysis="false"')
         self.assertNotContains(response, 'id="upload-panel"')
         self.assertNotContains(response, 'id="filter-panel"')
         self.assertEqual(response.context["initial_tool_tab"], "data")
@@ -566,6 +570,13 @@ class AnalysisViewTests(TestCase):
         process_accidents_mock,
         build_map_data_mock,
     ):
+        session = self.client.session
+        session[ANALYSIS_SESSION_KEY] = {
+            "view_mode": "individual",
+            "map_data": [{"id": "old"}],
+            "import_summary": {},
+        }
+        session.save()
         results = pd.DataFrame({"eligible": [True]})
         process_accidents_mock.return_value = results
         build_map_data_mock.return_value = self.map_data
@@ -579,7 +590,9 @@ class AnalysisViewTests(TestCase):
             {"files": uploaded_file},
         )
 
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.url, reverse("analysis"))
+        response = self.client.get(response.url)
         consolidated = process_accidents_mock.call_args.args[0]
         self.assertEqual(len(consolidated), 1)
         self.assertEqual(response.context["map_data"], self.map_data)
@@ -588,6 +601,8 @@ class AnalysisViewTests(TestCase):
             "filters",
         )
         self.assertContains(response, 'data-has-active-analysis="true"')
+        self.assertFalse(response.context["has_individual_analysis"])
+        self.assertContains(response, 'data-has-individual-analysis="false"')
         self.assertContains(response, 'data-filter-field="collision_1y_met"')
         self.assertNotContains(response, "data-individual-category")
         self.assertEqual(
@@ -599,6 +614,27 @@ class AnalysisViewTests(TestCase):
             },
         )
         self.assertEqual(response.context["view_mode"], "clusters")
+        self.assertEqual(
+            self.client.session[ANALYSIS_SESSION_KEY]["view_mode"],
+            "clusters",
+        )
+
+    def test_clear_request_removes_transient_individual_analysis(self):
+        session = self.client.session
+        session[ANALYSIS_SESSION_KEY] = {
+            "view_mode": "individual",
+            "map_data": [{"id": "old"}],
+            "import_summary": {},
+        }
+        session.save()
+
+        response = self.client.get("/?clear=1")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn(
+            ANALYSIS_SESSION_KEY,
+            self.client.session,
+        )
 
     @patch("accidents.views.build_individual_map_data")
     @patch("accidents.views.process_individual_accidents")
@@ -623,14 +659,23 @@ class AnalysisViewTests(TestCase):
             {"files": uploaded_file, "view_mode": "individual"},
         )
 
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.url, reverse("analysis"))
+        response = self.client.get(response.url)
         process_accidents_mock.assert_not_called()
         process_individual_mock.assert_called_once()
         build_individual_mock.assert_called_once_with(individual_results)
         self.assertEqual(response.context["map_data"], individual_map_data)
         self.assertEqual(response.context["view_mode"], "individual")
+        self.assertTrue(response.context["has_individual_analysis"])
+        self.assertEqual(
+            self.client.session[ANALYSIS_SESSION_KEY]["map_data"],
+            individual_map_data,
+        )
         self.assertEqual(response.context["initial_tool_tab"], "filters")
         self.assertContains(response, 'data-has-active-analysis="true"')
+        self.assertContains(response, 'data-has-individual-analysis="true"')
+        self.assertNotContains(response, 'id="signaling-survey-data"')
         self.assertEqual(response.context["import_summary"]["displayed_count"], 1)
         self.assertContains(response, "Filtre os pontos por tipo de sinistro individual")
         self.assertContains(response, "data-individual-category", count=5)
@@ -640,6 +685,37 @@ class AnalysisViewTests(TestCase):
         self.assertNotContains(response, 'data-filter-field="pedestrian_3y_met"')
         self.assertNotContains(response, "2+ em 1 ano")
         self.assertNotContains(response, "4+ em 3 anos")
+
+    @patch("accidents.views.build_individual_map_data", return_value=[])
+    @patch("accidents.views.process_individual_accidents")
+    def test_empty_individual_analysis_remains_available_for_surveys(
+        self,
+        process_individual_mock,
+        build_individual_mock,
+    ):
+        individual_results = pd.DataFrame()
+        process_individual_mock.return_value = individual_results
+        uploaded_file = make_upload(
+            "valid.csv",
+            [[1, "31/07/2026", -21.17, -47.81, "COLISAO", "RUA A", 10, "RIBEIRAO PRETO"]],
+        )
+
+        response = self.client.post(
+            "/",
+            {"files": uploaded_file, "view_mode": "individual"},
+        )
+
+        self.assertEqual(response.status_code, 302)
+        response = self.client.get(response.url)
+        build_individual_mock.assert_called_once_with(individual_results)
+        self.assertEqual(response.context["view_mode"], "individual")
+        self.assertEqual(response.context["map_data"], [])
+        self.assertTrue(response.context["has_individual_analysis"])
+        self.assertContains(response, 'data-has-individual-analysis="true"')
+        self.assertEqual(
+            self.client.session[ANALYSIS_SESSION_KEY]["map_data"],
+            [],
+        )
 
     @patch("accidents.views.process_individual_accidents")
     @patch("accidents.views.process_accidents")
@@ -684,7 +760,8 @@ class AnalysisViewTests(TestCase):
         )
 
         consolidated = process_accidents_mock.call_args.args[0]
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, 302)
+        response = self.client.get(response.url)
         self.assertEqual(
             consolidated["id_sinistro"].tolist(),
             [1, 2],
@@ -716,7 +793,7 @@ class AnalysisViewTests(TestCase):
         )
 
         consolidated = process_accidents_mock.call_args.args[0]
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, 302)
         self.assertEqual(len(consolidated), 1)
         self.assertEqual(
             consolidated.iloc[0]["logradouro"],

@@ -6,6 +6,11 @@ from signaling import views
 app_name = "signaling"
 
 urlpatterns = [
+    path(
+        "points/<int:point_id>/report/",
+        views.point_report,
+        name="point-report",
+    ),
     path("points/", views.create_point, name="create-point"),
     path(
         "points/<int:point_id>/delete/",

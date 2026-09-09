@@ -72,7 +72,7 @@ function updateSelectedFiles() {
 
 function clearFiles() {
     if (toolsPanel.dataset.hasServerState === "true") {
-        window.location.assign("/");
+        window.location.assign("/?clear=1");
         return;
     }
 

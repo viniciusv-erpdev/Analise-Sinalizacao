@@ -268,6 +268,9 @@ class SignalingPointEndpointTests(TestCase):
         response = self.post_json(delete_url, {})
 
         self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.headers["Content-Type"], "application/json")
+        self.assertFalse(response.json()["success"])
+        self.assertIn("error", response.json())
 
     def test_get_does_not_delete_point(self):
         point = self.create_point()
@@ -345,6 +348,7 @@ class SignalingPointEndpointTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.headers["Content-Type"], "application/json")
 
     def test_updating_status_does_not_change_other_point(self):
         point = self.create_point()
@@ -622,6 +626,7 @@ class SignalingInterventionEndpointTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.headers["Content-Type"], "application/json")
 
     def test_updated_notes_persist_in_later_map_query(self):
         intervention = SignalingIntervention.objects.create(
@@ -775,6 +780,7 @@ class SignalingInterventionEndpointTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.headers["Content-Type"], "application/json")
 
     def test_deletes_only_the_intervention(self):
         intervention = SignalingIntervention.objects.create(
@@ -793,6 +799,18 @@ class SignalingInterventionEndpointTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertFalse(SignalingIntervention.objects.exists())
         self.assertTrue(SignalingPoint.objects.filter(pk=self.point.pk).exists())
+
+    def test_deleting_missing_intervention_returns_json(self):
+        delete_url = reverse(
+            "signaling:delete-intervention",
+            args=[self.point.id, 999],
+        )
+
+        response = self.client.post(delete_url)
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.headers["Content-Type"], "application/json")
+        self.assertFalse(response.json()["success"])
 
     def test_deleting_one_of_three_keeps_the_other_two(self):
         interventions = [
@@ -871,6 +889,7 @@ class SignalingInterventionEndpointTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.headers["Content-Type"], "application/json")
 
     def test_updating_condition_does_not_change_other_intervention(self):
         intervention = SignalingIntervention.objects.create(

@@ -2,6 +2,9 @@ const signalingData = JSON.parse(
     document.getElementById("signaling-map-data").textContent
 );
 const signalingConfig = document.getElementById("signaling-config");
+const hasIndividualAnalysis = (
+    signalingConfig.dataset.hasIndividualAnalysis === "true"
+);
 const signalingLayer = L.layerGroup().addTo(map);
 const signalingMarkers = new Map();
 
@@ -151,6 +154,20 @@ async function postJson(url, body = {}) {
         body: JSON.stringify(body),
     });
 
+    const contentType = response.headers.get("Content-Type") || "";
+    if (!contentType.toLowerCase().includes("application/json")) {
+        const responseBody = await response.text();
+        console.error("Resposta não JSON da API de sinalização", {
+            status: response.status,
+            url: response.url,
+            contentType,
+            bodyStart: responseBody.slice(0, 200),
+        });
+        throw new Error(
+            "O servidor retornou uma resposta inesperada. Tente novamente."
+        );
+    }
+
     const data = await response.json();
     if (!response.ok) {
         const validationMessage = data.errors
@@ -192,6 +209,14 @@ function createSignalingIcon(status) {
 
 function deleteUrl(pointId) {
     return signalingConfig.dataset.deleteUrlTemplate.replace(
+        "/0/",
+        `/${pointId}/`
+    );
+}
+
+
+function reportUrl(pointId) {
+    return signalingConfig.dataset.reportUrlTemplate.replace(
         "/0/",
         `/${pointId}/`
     );
@@ -329,6 +354,7 @@ function buildInterventionList(point) {
 
 
 function buildExistingPointPopup(point) {
+    const surveyAvailable = hasIndividualAnalysis;
     const statusOptions = Object.entries(signalingStatuses)
         .map(([status, config]) => `
             <button
@@ -401,6 +427,25 @@ function buildExistingPointPopup(point) {
                     </div>
                 </form>
             </section>
+            <div class="d-grid gap-1 mt-2">
+                ${surveyAvailable ? `
+                    <a
+                        class="btn btn-outline-primary btn-sm"
+                        href="${reportUrl(point.id)}"
+                    >Gerar relatório</a>
+                ` : `
+                    <button
+                        class="btn btn-outline-primary btn-sm"
+                        type="button"
+                        disabled
+                    >Gerar relatório</button>
+                `}
+                ${surveyAvailable ? "" : `
+                    <small class="text-secondary">
+                        Carregue os arquivos no modo Todos os sinistros para gerar este levantamento.
+                    </small>
+                `}
+            </div>
             <div class="d-grid gap-2 mt-2">
                 <button
                     class="btn btn-primary btn-sm"
