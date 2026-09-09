@@ -1131,7 +1131,10 @@
 
 <body>
 
-    <div id="map"></div>
+    <div
+        id="map"
+        data-has-active-analysis="{% if import_summary %}true{% else %}false{% endif %}"
+    ></div>
 
     <section
         id="tools-panel"
@@ -1366,7 +1369,6 @@
                     7+ em 3 anos
                 </label>
             </fieldset>
-            {% endif %}
 
             <fieldset class="filter-group">
                 <legend>Atropelamentos</legend>
@@ -1387,6 +1389,7 @@
                     4+ em 3 anos
                 </label>
             </fieldset>
+            {% endif %}
 
             <p
                 id="filter-counter"

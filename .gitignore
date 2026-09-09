@@ -79,3 +79,5 @@ $RECYCLE.BIN/
 .pytest_cache/
 .coverage
 htmlcov/
+data/local/*.xlsx
+data/local/*.csv

@@ -554,6 +554,7 @@ class AnalysisViewTests(TestCase):
         self.assertContains(response, 'id="clear-filters-button"')
         self.assertContains(response, 'id="minimize-tools-panel"')
         self.assertContains(response, 'id="open-tools-panel"')
+        self.assertContains(response, 'data-has-active-analysis="false"')
         self.assertNotContains(response, 'id="upload-panel"')
         self.assertNotContains(response, 'id="filter-panel"')
         self.assertEqual(response.context["initial_tool_tab"], "data")
@@ -586,6 +587,9 @@ class AnalysisViewTests(TestCase):
             response.context["initial_tool_tab"],
             "filters",
         )
+        self.assertContains(response, 'data-has-active-analysis="true"')
+        self.assertContains(response, 'data-filter-field="collision_1y_met"')
+        self.assertNotContains(response, "data-individual-category")
         self.assertEqual(
             response.context["import_summary"],
             {
@@ -625,11 +629,17 @@ class AnalysisViewTests(TestCase):
         build_individual_mock.assert_called_once_with(individual_results)
         self.assertEqual(response.context["map_data"], individual_map_data)
         self.assertEqual(response.context["view_mode"], "individual")
-        self.assertEqual(response.context["initial_tool_tab"], "data")
+        self.assertEqual(response.context["initial_tool_tab"], "filters")
+        self.assertContains(response, 'data-has-active-analysis="true"')
         self.assertEqual(response.context["import_summary"]["displayed_count"], 1)
         self.assertContains(response, "Filtre os pontos por tipo de sinistro individual")
         self.assertContains(response, "data-individual-category", count=5)
         self.assertNotContains(response, 'data-filter-field="collision_1y_met"')
+        self.assertNotContains(response, 'data-filter-field="collision_3y_met"')
+        self.assertNotContains(response, 'data-filter-field="pedestrian_1y_met"')
+        self.assertNotContains(response, 'data-filter-field="pedestrian_3y_met"')
+        self.assertNotContains(response, "2+ em 1 ano")
+        self.assertNotContains(response, "4+ em 3 anos")
 
     @patch("accidents.views.process_individual_accidents")
     @patch("accidents.views.process_accidents")

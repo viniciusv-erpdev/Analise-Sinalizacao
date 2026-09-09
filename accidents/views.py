@@ -70,7 +70,7 @@ def analysis_view(request):
         "individual_filter_categories": INDIVIDUAL_FILTER_CATEGORIES,
         "initial_tool_tab": (
             "filters"
-            if import_summary and view_mode == "clusters"
+            if import_summary
             else "data"
         ),
     }

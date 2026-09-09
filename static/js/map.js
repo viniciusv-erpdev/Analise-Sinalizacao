@@ -20,6 +20,20 @@ const mapData = JSON.parse(
 const viewMode = JSON.parse(
     document.getElementById("view-mode").textContent
 );
+const hasActiveAnalysis = (
+    document.getElementById("map").dataset.hasActiveAnalysis === "true"
+);
+const individualRenderer = viewMode === "individual"
+    ? L.canvas({padding: 0.5})
+    : null;
+const documentStyles = getComputedStyle(document.documentElement);
+const individualCategoryColors = {
+    pedestrian: documentStyles.getPropertyValue("--marker-pedestrian").trim(),
+    crash: documentStyles.getPropertyValue("--marker-individual-crash").trim(),
+    collision: documentStyles.getPropertyValue("--marker-individual-collision").trim(),
+    unavailable: documentStyles.getPropertyValue("--marker-individual-unavailable").trim(),
+    other: documentStyles.getPropertyValue("--marker-individual-other").trim(),
+};
 const markersLayer = L.layerGroup().addTo(map);
 const filterInputs = Array.from(
     document.querySelectorAll(
@@ -66,13 +80,17 @@ function createMarkerIcon(category) {
 }
 
 
-function createIndividualMarkerIcon(category) {
-    return L.divIcon({
-        className: `map-marker map-marker--individual-${category}`,
-        html: '<span class="map-marker__dot" aria-hidden="true"></span>',
-        iconSize: [18, 18],
-        iconAnchor: [9, 9],
-        popupAnchor: [0, -10],
+function createIndividualMarker(coordinates, category) {
+    return L.circleMarker(coordinates, {
+        renderer: individualRenderer,
+        radius: 7,
+        color: "#ffffff",
+        weight: 2,
+        opacity: 1,
+        fillColor: individualCategoryColors[category]
+            || individualCategoryColors.other,
+        fillOpacity: 0.9,
+        bubblingMouseEvents: false,
     });
 }
 
@@ -244,21 +262,31 @@ const markerRecords = mapData.map(point => {
         ? point.category
         : getMarkerCategory(point);
 
-    const marker = L.marker([
+    const coordinates = [
         point.latitude,
         point.longitude
-    ], {
-        icon: viewMode === "individual"
-            ? createIndividualMarkerIcon(category)
-            : createMarkerIcon(category),
-    });
+    ];
+    const marker = viewMode === "individual"
+        ? createIndividualMarker(coordinates, category)
+        : L.marker(coordinates, {icon: createMarkerIcon(category)});
 
-    marker.bindPopup(
-        viewMode === "individual"
-            ? buildIndividualMarkerPopup(point)
-            : buildMarkerPopup(point, category),
-        {maxWidth: 320}
-    );
+    if (viewMode === "individual") {
+        let popupContent = null;
+        marker.bindPopup(
+            () => {
+                if (!popupContent) {
+                    popupContent = buildIndividualMarkerPopup(point);
+                }
+                return popupContent;
+            },
+            {maxWidth: 320}
+        );
+    } else {
+        marker.bindPopup(
+            buildMarkerPopup(point, category),
+            {maxWidth: 320}
+        );
+    }
 
     return {point, marker};
 });
@@ -290,11 +318,25 @@ function applyMapFilters() {
     const activeFilters = getActiveFilters();
     let visibleCount = 0;
 
-    markersLayer.clearLayers();
+    if (viewMode !== "individual") {
+        markersLayer.clearLayers();
+    }
 
     markerRecords.forEach(({point, marker}) => {
-        if (pointMatchesFilters(point, activeFilters)) {
+        const shouldBeVisible = pointMatchesFilters(point, activeFilters);
+        if (viewMode === "individual") {
+            const isVisible = markersLayer.hasLayer(marker);
+
+            if (shouldBeVisible && !isVisible) {
+                markersLayer.addLayer(marker);
+            } else if (!shouldBeVisible && isVisible) {
+                markersLayer.removeLayer(marker);
+            }
+        } else if (shouldBeVisible) {
             markersLayer.addLayer(marker);
+        }
+
+        if (shouldBeVisible) {
             visibleCount += 1;
         }
     });
@@ -356,5 +398,7 @@ filterInputs.forEach((input) => {
 clearFiltersButton.disabled = markerRecords.length === 0;
 clearFiltersButton.addEventListener("click", clearMapFilters);
 
-createMapLegend();
+if (hasActiveAnalysis) {
+    createMapLegend();
+}
 applyMapFilters();
