@@ -10,6 +10,7 @@ def get_signaling_map_data() -> list[dict[str, object]]:
             "latitude": float(point.latitude),
             "longitude": float(point.longitude),
             "status": point.status,
+            "search_radius_meters": point.search_radius_meters,
             "interventions": [
                 {
                     "id": intervention.id,
@@ -21,7 +22,7 @@ def get_signaling_map_data() -> list[dict[str, object]]:
             ],
         }
         for point in SignalingPoint.objects.only(
-            "id", "latitude", "longitude", "status"
+            "id", "latitude", "longitude", "status", "search_radius_meters"
         ).prefetch_related(
             Prefetch(
                 "interventions",

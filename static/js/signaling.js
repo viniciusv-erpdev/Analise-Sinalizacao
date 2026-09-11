@@ -5,8 +5,11 @@ const signalingConfig = document.getElementById("signaling-config");
 const hasIndividualAnalysis = (
     signalingConfig.dataset.hasIndividualAnalysis === "true"
 );
-const signalingSurveyRadiusMeters = Number(
-    signalingConfig.dataset.surveyRadiusMeters
+const minSignalingSearchRadiusMeters = Number(
+    signalingConfig.dataset.minSearchRadiusMeters
+);
+const maxSignalingSearchRadiusMeters = Number(
+    signalingConfig.dataset.maxSearchRadiusMeters
 );
 const signalingLayer = L.layerGroup().addTo(map);
 const signalingMarkers = new Map();
@@ -241,6 +244,14 @@ function updateStatusUrl(pointId) {
 }
 
 
+function updateSearchRadiusUrl(pointId) {
+    return signalingConfig.dataset.updateSearchRadiusUrlTemplate.replace(
+        "/0/",
+        `/${pointId}/`
+    );
+}
+
+
 function interventionUrl(pointId) {
     return signalingConfig.dataset.interventionUrlTemplate.replace(
         "/0/",
@@ -437,6 +448,35 @@ function buildExistingPointPopup(point) {
                     </div>
                 </form>
             </section>
+            <div class="mt-2">
+                <label
+                    class="form-label small fw-semibold mb-1"
+                    for="search-radius-${point.id}"
+                >Raio de busca</label>
+                <div class="input-group input-group-sm">
+                    <input
+                        class="form-control"
+                        id="search-radius-${point.id}"
+                        type="number"
+                        min="${minSignalingSearchRadiusMeters}"
+                        max="${maxSignalingSearchRadiusMeters}"
+                        step="10"
+                        value="${point.search_radius_meters}"
+                        data-search-radius
+                        aria-describedby="search-radius-unit-${point.id}"
+                    >
+                    <span
+                        class="input-group-text"
+                        id="search-radius-unit-${point.id}"
+                    >m</span>
+                </div>
+                <small
+                    class="text-danger d-block mt-1"
+                    data-search-radius-error
+                    role="alert"
+                    hidden
+                ></small>
+            </div>
             <div class="d-grid gap-1 mt-2">
                 ${surveyAvailable ? `
                     <a
@@ -609,6 +649,34 @@ function showPointPopup(marker, point) {
     L.DomEvent.disableScrollPropagation(popupElement);
 
     const statusEditor = popupElement.querySelector("[data-status-editor]");
+    const searchRadiusInput = popupElement.querySelector("[data-search-radius]");
+    const searchRadiusError = popupElement.querySelector(
+        "[data-search-radius-error]"
+    );
+    searchRadiusInput.addEventListener("change", async (event) => {
+        L.DomEvent.stopPropagation(event);
+        const previousRadius = point.search_radius_meters;
+        searchRadiusInput.disabled = true;
+        searchRadiusError.hidden = true;
+        try {
+            const updatedPoint = await postJson(
+                updateSearchRadiusUrl(point.id),
+                {search_radius_meters: Number(searchRadiusInput.value)}
+            );
+            point.search_radius_meters = updatedPoint.search_radius_meters;
+            searchRadiusInput.value = point.search_radius_meters;
+            const radiusCircle = signalingRadiusCircles.get(point.id);
+            if (radiusCircle) {
+                radiusCircle.setRadius(point.search_radius_meters);
+            }
+        } catch (error) {
+            searchRadiusInput.value = previousRadius;
+            searchRadiusError.textContent = error.message;
+            searchRadiusError.hidden = false;
+        } finally {
+            searchRadiusInput.disabled = false;
+        }
+    });
     const editStatusButton = popupElement.querySelector(
         "[data-edit-point-status]"
     );
@@ -981,7 +1049,7 @@ function addSignalingMarker(point) {
 
     const radiusCircle = L.circle([point.latitude, point.longitude], {
         pane: "signalingRadiusPane",
-        radius: signalingSurveyRadiusMeters,
+        radius: point.search_radius_meters,
         color: "#0dcaf0",
         weight: 2,
         opacity: 0.65,

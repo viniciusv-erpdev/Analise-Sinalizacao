@@ -8,7 +8,6 @@ from accidents.normalizer import INDIVIDUAL_COUNT_COLUMNS
 from analysis.spatial import EARTH_RADIUS_METERS, haversine_distance_meters
 from signaling.models import SignalingIntervention, SignalingPoint
 from signaling.surveys import (
-    SIGNALING_SURVEY_RADIUS_METERS,
     build_signaling_survey,
     ANALYSIS_SESSION_KEY,
 )
@@ -68,12 +67,12 @@ class SignalingSurveyTests(TestCase):
         self.assertEqual(result["total_accidents"], 1)
 
     def test_accident_exactly_at_fifty_meters_is_included(self):
-        latitude = degrees(SIGNALING_SURVEY_RADIUS_METERS / EARTH_RADIUS_METERS)
+        latitude = degrees(self.point.search_radius_meters / EARTH_RADIUS_METERS)
         distance = haversine_distance_meters(0, 0, latitude, 0)
 
         result = self.survey(self.accident(1, latitude=latitude))
 
-        self.assertAlmostEqual(distance, SIGNALING_SURVEY_RADIUS_METERS)
+        self.assertAlmostEqual(distance, self.point.search_radius_meters)
         self.assertEqual(result["total_accidents"], 1)
 
     def test_accident_outside_fifty_meters_is_excluded(self):
@@ -169,6 +168,51 @@ class SignalingSurveyTests(TestCase):
         self.assertEqual(result["accidents"][0]["modes"], [
             {"name": "Automóvel", "quantity": 2},
         ])
+
+
+    def test_each_point_uses_its_persisted_search_radius(self):
+        accident_at_forty = self.accident(
+            1,
+            latitude=degrees(40 / EARTH_RADIUS_METERS),
+        )
+        accident_at_eighty = self.accident(
+            2,
+            latitude=degrees(80 / EARTH_RADIUS_METERS),
+        )
+
+        self.point.search_radius_meters = 50
+        self.point.save(update_fields=["search_radius_meters"])
+        survey_at_fifty = self.survey(accident_at_forty, accident_at_eighty)
+
+        self.point.search_radius_meters = 100
+        self.point.save(update_fields=["search_radius_meters"])
+        survey_at_one_hundred = self.survey(accident_at_forty, accident_at_eighty)
+
+        self.assertEqual(survey_at_fifty["total_accidents"], 1)
+        self.assertEqual(survey_at_fifty["radius_meters"], 50)
+        self.assertEqual(survey_at_one_hundred["total_accidents"], 2)
+        self.assertEqual(survey_at_one_hundred["radius_meters"], 100)
+
+    def test_different_points_use_independent_search_radii(self):
+        other_point = SignalingPoint.objects.create(
+            latitude=0,
+            longitude=0,
+            status=SignalingPoint.Status.OK,
+            search_radius_meters=150,
+        )
+        accident = self.accident(
+            1,
+            latitude=degrees(100 / EARTH_RADIUS_METERS),
+        )
+
+        first_survey = self.survey(accident)
+        second_survey = build_signaling_survey(
+            other_point,
+            pd.DataFrame([accident]),
+        )
+
+        self.assertEqual(first_survey["total_accidents"], 0)
+        self.assertEqual(second_survey["total_accidents"], 1)
 
 
 class SignalingReportTests(TestCase):

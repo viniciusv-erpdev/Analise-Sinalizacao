@@ -8,7 +8,6 @@ from analysis.spatial import haversine_distance_meters
 from signaling.models import SignalingIntervention, SignalingPoint
 
 
-SIGNALING_SURVEY_RADIUS_METERS = 40
 ANALYSIS_SESSION_KEY = "accident_analysis_state"
 
 POINT_STATUS_LABELS = {
@@ -47,6 +46,7 @@ def build_signaling_survey_from_items(
 
     point_latitude = float(signaling_point.latitude)
     point_longitude = float(signaling_point.longitude)
+    radius_meters = signaling_point.search_radius_meters
 
     for item in accidents:
         distance = haversine_distance_meters(
@@ -55,7 +55,7 @@ def build_signaling_survey_from_items(
             float(item["latitude"]),
             float(item["longitude"]),
         )
-        if distance > SIGNALING_SURVEY_RADIUS_METERS:
+        if distance > radius_meters:
             continue
 
         accident = dict(item)
@@ -85,7 +85,7 @@ def build_signaling_survey_from_items(
 
     return {
         "signaling_point_id": signaling_point.id,
-        "radius_meters": SIGNALING_SURVEY_RADIUS_METERS,
+        "radius_meters": radius_meters,
         "status": {
             "value": signaling_point.status,
             "label": POINT_STATUS_LABELS[signaling_point.status],

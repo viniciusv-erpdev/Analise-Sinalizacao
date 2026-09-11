@@ -6,7 +6,12 @@ from django.http import HttpRequest, JsonResponse
 from django.shortcuts import get_object_or_404, render
 from django.views.decorators.http import require_POST
 
-from signaling.models import SignalingIntervention, SignalingPoint
+from signaling.models import (
+    MAX_SIGNALING_SEARCH_RADIUS_METERS,
+    MIN_SIGNALING_SEARCH_RADIUS_METERS,
+    SignalingIntervention,
+    SignalingPoint,
+)
 from signaling.surveys import (
     ANALYSIS_SESSION_KEY,
     build_signaling_survey_from_items,
@@ -14,6 +19,11 @@ from signaling.surveys import (
 
 
 COORDINATE_PRECISION = Decimal("0.000001")
+SEARCH_RADIUS_ERROR = (
+    "O raio deve estar entre "
+    f"{MIN_SIGNALING_SEARCH_RADIUS_METERS} e "
+    f"{MAX_SIGNALING_SEARCH_RADIUS_METERS} metros."
+)
 
 
 def point_report(request: HttpRequest, point_id: int):
@@ -67,6 +77,7 @@ def _point_payload(point: SignalingPoint) -> dict[str, object]:
         "latitude": float(point.latitude),
         "longitude": float(point.longitude),
         "status": point.status,
+        "search_radius_meters": point.search_radius_meters,
         "interventions": [],
     }
 
@@ -161,6 +172,60 @@ def update_point_status(request: HttpRequest, point_id: int) -> JsonResponse:
     return JsonResponse(
         {"success": True, "id": point.id, "status": point.status}
     )
+
+
+@require_POST
+def update_point_search_radius(
+    request: HttpRequest,
+    point_id: int,
+) -> JsonResponse:
+    try:
+        point = SignalingPoint.objects.get(pk=point_id)
+    except SignalingPoint.DoesNotExist:
+        return _api_not_found("Ponto de sinalizaÃ§Ã£o")
+    data = _read_json(request)
+    if data is None:
+        return JsonResponse(
+            {"success": False, "error": "JSON invÃ¡lido."},
+            status=400,
+        )
+
+    value = data.get("search_radius_meters")
+    try:
+        radius = Decimal(str(value))
+        if (
+            isinstance(value, bool)
+            or not radius.is_finite()
+            or radius != radius.to_integral_value()
+        ):
+            raise ValueError
+        point.search_radius_meters = int(radius)
+    except (InvalidOperation, TypeError, ValueError):
+        return JsonResponse(
+            {
+                "success": False,
+                "error": f"{SEARCH_RADIUS_ERROR[:-1]} e ser um nÃºmero inteiro.",
+            },
+            status=400,
+        )
+
+    try:
+        point.full_clean()
+    except ValidationError:
+        return JsonResponse(
+            {
+                "success": False,
+                "error": SEARCH_RADIUS_ERROR,
+            },
+            status=400,
+        )
+
+    point.save(update_fields=["search_radius_meters", "updated_at"])
+    return JsonResponse({
+        "success": True,
+        "id": point.id,
+        "search_radius_meters": point.search_radius_meters,
+    })
 
 
 @require_POST

@@ -10,8 +10,12 @@ from analysis.map_data import (
     build_map_data,
 )
 from analysis.pipeline import process_accidents, process_individual_accidents
+from signaling.models import (
+    MAX_SIGNALING_SEARCH_RADIUS_METERS,
+    MIN_SIGNALING_SEARCH_RADIUS_METERS,
+)
 from signaling.services import get_signaling_map_data
-from signaling.surveys import ANALYSIS_SESSION_KEY, SIGNALING_SURVEY_RADIUS_METERS
+from signaling.surveys import ANALYSIS_SESSION_KEY
 
 
 def analysis_view(request):
@@ -89,7 +93,8 @@ def analysis_view(request):
         "view_mode": view_mode,
         "has_individual_analysis": has_individual_analysis,
         "individual_filter_categories": INDIVIDUAL_FILTER_CATEGORIES,
-        "signaling_survey_radius_meters": SIGNALING_SURVEY_RADIUS_METERS,
+        "min_signaling_search_radius_meters": MIN_SIGNALING_SEARCH_RADIUS_METERS,
+        "max_signaling_search_radius_meters": MAX_SIGNALING_SEARCH_RADIUS_METERS,
         "initial_tool_tab": (
             "filters"
             if import_summary

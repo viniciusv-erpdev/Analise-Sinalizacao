@@ -2,6 +2,11 @@ from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 
 
+DEFAULT_SIGNALING_SEARCH_RADIUS_METERS = 50
+MIN_SIGNALING_SEARCH_RADIUS_METERS = 10
+MAX_SIGNALING_SEARCH_RADIUS_METERS = 300
+
+
 class SignalingPoint(models.Model):
     class Status(models.TextChoices):
         OK = "OK", "Adequada"
@@ -19,6 +24,13 @@ class SignalingPoint(models.Model):
         validators=[MinValueValidator(-180), MaxValueValidator(180)],
     )
     status = models.CharField(max_length=10, choices=Status.choices)
+    search_radius_meters = models.PositiveSmallIntegerField(
+        default=DEFAULT_SIGNALING_SEARCH_RADIUS_METERS,
+        validators=[
+            MinValueValidator(MIN_SIGNALING_SEARCH_RADIUS_METERS),
+            MaxValueValidator(MAX_SIGNALING_SEARCH_RADIUS_METERS),
+        ],
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

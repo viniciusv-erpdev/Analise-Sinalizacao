@@ -23,6 +23,11 @@ urlpatterns = [
         name="update-point-status",
     ),
     path(
+        "points/<int:point_id>/search-radius/",
+        views.update_point_search_radius,
+        name="update-point-search-radius",
+    ),
+    path(
         "points/<int:point_id>/interventions/",
         views.save_intervention,
         name="save-intervention",

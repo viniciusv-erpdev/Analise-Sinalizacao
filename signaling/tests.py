@@ -5,7 +5,12 @@ from django.core.exceptions import ValidationError
 from django.test import TestCase
 from django.urls import reverse
 
-from signaling.models import SignalingIntervention, SignalingPoint
+from signaling.models import (
+    MAX_SIGNALING_SEARCH_RADIUS_METERS,
+    MIN_SIGNALING_SEARCH_RADIUS_METERS,
+    SignalingIntervention,
+    SignalingPoint,
+)
 
 
 class SignalingPointTests(TestCase):
@@ -40,6 +45,32 @@ class SignalingPointTests(TestCase):
         self.assertEqual(persisted_point.longitude, Decimal("-47.810000"))
         self.assertIsNotNone(persisted_point.created_at)
         self.assertIsNotNone(persisted_point.updated_at)
+
+    def test_search_radius_defaults_to_fifty_meters(self):
+        point = self.create_point()
+
+        self.assertEqual(point.search_radius_meters, 50)
+
+    def test_accepts_minimum_and_maximum_search_radius(self):
+        for radius in (
+            MIN_SIGNALING_SEARCH_RADIUS_METERS,
+            MAX_SIGNALING_SEARCH_RADIUS_METERS,
+        ):
+            with self.subTest(radius=radius):
+                point = self.create_point()
+                point.search_radius_meters = radius
+                point.full_clean()
+
+    def test_rejects_search_radius_outside_limits(self):
+        for radius in (
+            MIN_SIGNALING_SEARCH_RADIUS_METERS - 1,
+            MAX_SIGNALING_SEARCH_RADIUS_METERS + 1,
+        ):
+            with self.subTest(radius=radius):
+                point = self.create_point()
+                point.search_radius_meters = radius
+                with self.assertRaises(ValidationError):
+                    point.full_clean()
 
     def test_rejects_invalid_status_during_model_validation(self):
         point = SignalingPoint(
@@ -189,6 +220,7 @@ class SignalingPointEndpointTests(TestCase):
                 "latitude": -21.17,
                 "longitude": -47.81,
                 "status": SignalingPoint.Status.OK,
+                "search_radius_meters": 50,
                 "interventions": [],
             }],
         )
@@ -365,6 +397,60 @@ class SignalingPointEndpointTests(TestCase):
 
         other_point.refresh_from_db()
         self.assertEqual(other_point.status, SignalingPoint.Status.ABSENT)
+
+    def test_updates_search_radius(self):
+        point = self.create_point()
+
+        response = self.post_json(
+            reverse("signaling:update-point-search-radius", args=[point.id]),
+            {"search_radius_meters": 100},
+        )
+
+        point.refresh_from_db()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["search_radius_meters"], 100)
+        self.assertEqual(point.search_radius_meters, 100)
+
+    def test_accepts_non_step_integer_search_radius(self):
+        point = self.create_point()
+
+        response = self.post_json(
+            reverse("signaling:update-point-search-radius", args=[point.id]),
+            {"search_radius_meters": 75},
+        )
+
+        point.refresh_from_db()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(point.search_radius_meters, 75)
+
+    def test_rejects_invalid_search_radius_without_changing_database(self):
+        for invalid_radius in (9, 301, "abc", None, 75.5):
+            with self.subTest(invalid_radius=invalid_radius):
+                point = self.create_point()
+                response = self.post_json(
+                    reverse(
+                        "signaling:update-point-search-radius",
+                        args=[point.id],
+                    ),
+                    {"search_radius_meters": invalid_radius},
+                )
+                point.refresh_from_db()
+                self.assertEqual(response.status_code, 400)
+                self.assertEqual(point.search_radius_meters, 50)
+
+    def test_updating_radius_does_not_change_other_point(self):
+        point = self.create_point()
+        other_point = self.create_point()
+        other_point.search_radius_meters = 150
+        other_point.save(update_fields=["search_radius_meters"])
+
+        self.post_json(
+            reverse("signaling:update-point-search-radius", args=[point.id]),
+            {"search_radius_meters": 100},
+        )
+
+        other_point.refresh_from_db()
+        self.assertEqual(other_point.search_radius_meters, 150)
 
 
 class SignalingInterventionEndpointTests(TestCase):
