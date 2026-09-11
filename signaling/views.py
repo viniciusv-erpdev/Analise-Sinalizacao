@@ -2,15 +2,24 @@ import json
 from decimal import Decimal, InvalidOperation
 
 from django.core.exceptions import ValidationError
-from django.http import HttpRequest, JsonResponse
+from django.http import FileResponse, HttpRequest, JsonResponse
 from django.shortcuts import get_object_or_404, render
+from django.templatetags.static import static
+from django.utils import timezone
 from django.views.decorators.http import require_POST
 
+from signaling.forms import SignalingReportForm
+from signaling.intervention_icons import get_intervention_icon_filename
 from signaling.models import (
     MAX_SIGNALING_SEARCH_RADIUS_METERS,
     MIN_SIGNALING_SEARCH_RADIUS_METERS,
     SignalingIntervention,
     SignalingPoint,
+)
+from signaling.report_generator import (
+    InvalidReportImage,
+    build_accident_types_chart_data_uri,
+    generate_signaling_report,
 )
 from signaling.surveys import (
     ANALYSIS_SESSION_KEY,
@@ -41,10 +50,57 @@ def point_report(request: HttpRequest, point_id: int):
         accidents = analysis_state["map_data"]
         survey = build_signaling_survey_from_items(point, accidents)
 
+    form = (
+        SignalingReportForm(request.POST, request.FILES)
+        if request.method == "POST"
+        else SignalingReportForm()
+    )
+    if request.method == "POST" and survey is not None and form.is_valid():
+        try:
+            report_buffer = generate_signaling_report(
+                point,
+                survey,
+                form.cleaned_data,
+                form.cleaned_data["photos"],
+            )
+        except InvalidReportImage as error:
+            form.add_error("photos", str(error))
+        else:
+            filename = (
+                f"relatorio_local_{point.id}_"
+                f"{timezone.localdate().isoformat()}.docx"
+            )
+            return FileResponse(
+                report_buffer,
+                as_attachment=True,
+                filename=filename,
+                content_type=(
+                    "application/vnd.openxmlformats-officedocument."
+                    "wordprocessingml.document"
+                ),
+            )
+
+    chart_data_uri = None
+    if survey is not None:
+        chart_data_uri = build_accident_types_chart_data_uri(survey)
+        for intervention in survey["interventions"]:
+            icon_filename = get_intervention_icon_filename(intervention["type"])
+            intervention["icon_url"] = (
+                static(f"icons/signaling/{icon_filename}")
+                if icon_filename
+                else None
+            )
+
     return render(
         request,
         "signaling/report.html",
-        {"point": point, "survey": survey},
+        {
+            "point": point,
+            "survey": survey,
+            "form": form,
+            "generated_on": timezone.localdate(),
+            "chart_data_uri": chart_data_uri,
+        },
     )
 
 

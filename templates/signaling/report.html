@@ -14,6 +14,8 @@
         .report-container { max-width: 960px; }
         .report-note { white-space: pre-wrap; overflow-wrap: anywhere; }
         .report-accidents { max-height: 430px; overflow-y: auto; }
+        .report-chart { display: block; width: 100%; max-width: 760px; height: auto; margin: 0 auto; }
+        .report-intervention-icon { width: 40px; height: 40px; object-fit: contain; }
     </style>
 </head>
 <body class="bg-light">
@@ -33,6 +35,84 @@
                 </p>
             </div>
         {% else %}
+            <form method="post" enctype="multipart/form-data" novalidate>
+                {% csrf_token %}
+                {% if form.non_field_errors %}
+                    <div class="alert alert-danger" role="alert">
+                        {{ form.non_field_errors }}
+                    </div>
+                {% endif %}
+
+                <section class="card shadow-sm mb-3">
+                    <div class="card-body">
+                        <h2 class="h5 card-title">Informações do estudo</h2>
+                        <div class="row g-3">
+                            <div class="col-12">
+                                <label class="form-label" for="{{ form.inspection_address.id_for_label }}">
+                                    {{ form.inspection_address.label }}
+                                </label>
+                                {{ form.inspection_address }}
+                                {% for error in form.inspection_address.errors %}
+                                    <div class="invalid-feedback d-block">{{ error }}</div>
+                                {% endfor %}
+                            </div>
+                            <div class="col-md-4">
+                                <span class="form-label d-block">Data de geração do relatório</span>
+                                <span class="form-control bg-light">{{ generated_on|date:"d/m/Y" }}</span>
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label" for="{{ form.occurrence_date.id_for_label }}">
+                                    {{ form.occurrence_date.label }}
+                                </label>
+                                {{ form.occurrence_date }}
+                                {% for error in form.occurrence_date.errors %}
+                                    <div class="invalid-feedback d-block">{{ error }}</div>
+                                {% endfor %}
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label" for="{{ form.inspection_date.id_for_label }}">
+                                    {{ form.inspection_date.label }}
+                                </label>
+                                {{ form.inspection_date }}
+                                {% for error in form.inspection_date.errors %}
+                                    <div class="invalid-feedback d-block">{{ error }}</div>
+                                {% endfor %}
+                            </div>
+                            <div class="col-12">
+                                <label class="form-label" for="{{ form.study_reason.id_for_label }}">
+                                    {{ form.study_reason.label }}
+                                </label>
+                                {{ form.study_reason }}
+                                {% for error in form.study_reason.errors %}
+                                    <div class="invalid-feedback d-block">{{ error }}</div>
+                                {% endfor %}
+                            </div>
+                            <div class="col-12">
+                                <label class="form-label" for="{{ form.inspector_name.id_for_label }}">
+                                    {{ form.inspector_name.label }}
+                                </label>
+                                {{ form.inspector_name }}
+                                {% for error in form.inspector_name.errors %}
+                                    <div class="invalid-feedback d-block">{{ error }}</div>
+                                {% endfor %}
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="card shadow-sm mb-3">
+                    <div class="card-body">
+                        <h2 class="h5 card-title">Objetivo</h2>
+                        <label class="form-label" for="{{ form.study_objective.id_for_label }}">
+                            {{ form.study_objective.label }}
+                        </label>
+                        {{ form.study_objective }}
+                        {% for error in form.study_objective.errors %}
+                            <div class="invalid-feedback d-block">{{ error }}</div>
+                        {% endfor %}
+                    </div>
+                </section>
+
             <section class="card shadow-sm mb-3">
                 <div class="card-body">
                     <h2 class="h5 card-title">Resumo</h2>
@@ -54,6 +134,11 @@
             <section class="card shadow-sm mb-3">
                 <div class="card-body">
                     <h2 class="h5 card-title">Tipos de sinistro</h2>
+                    <img
+                        class="report-chart"
+                        src="{{ chart_data_uri }}"
+                        alt="Gráfico de colunas dos tipos de sinistro"
+                    >
                     <ul class="list-group list-group-flush">
                         {% for label, quantity in survey.summary.by_type.items %}
                             <li class="list-group-item d-flex justify-content-between px-0">
@@ -66,22 +151,6 @@
             </section>
 
             <section class="card shadow-sm mb-3">
-                <div class="card-body">
-                    <h2 class="h5 card-title">Intervenções</h2>
-                    {% for intervention in survey.interventions %}
-                        <article class="border-bottom py-2">
-                            <strong>{{ intervention.type_label }} — {{ intervention.condition_label }}</strong>
-                            <p class="report-note small text-secondary mb-0">
-                                {% if intervention.notes %}{{ intervention.notes }}{% else %}Sem observações{% endif %}
-                            </p>
-                        </article>
-                    {% empty %}
-                        <p class="text-secondary mb-0">Nenhuma intervenção cadastrada.</p>
-                    {% endfor %}
-                </div>
-            </section>
-
-            <section class="card shadow-sm">
                 <div class="card-body">
                     <h2 class="h5 card-title">Sinistros relacionados</h2>
                     {% if survey.accidents %}
@@ -121,6 +190,62 @@
                     {% endif %}
                 </div>
             </section>
+
+                <section class="card shadow-sm mb-3">
+                    <div class="card-body">
+                        <h2 class="h5 card-title">Intervenções</h2>
+                        <div class="d-grid gap-2">
+                            {% for intervention in survey.interventions %}
+                                <article class="border rounded p-3">
+                                    <div class="d-flex flex-column flex-sm-row gap-3 align-items-sm-start">
+                                        {% if intervention.icon_url %}
+                                            <img
+                                                class="report-intervention-icon flex-shrink-0"
+                                                src="{{ intervention.icon_url }}"
+                                                alt=""
+                                            >
+                                        {% endif %}
+                                        <div class="flex-grow-1">
+                                            <div class="d-flex flex-wrap gap-2 justify-content-between mb-1">
+                                                <strong>{{ intervention.type_label }}</strong>
+                                                <span class="small">
+                                                    Status: <strong>{{ intervention.condition_label }}</strong>
+                                                </span>
+                                            </div>
+                                            <p class="report-note small text-secondary mb-0">
+                                                <strong>Observações:</strong>
+                                                {% if intervention.notes %}{{ intervention.notes }}{% else %}Não informado{% endif %}
+                                            </p>
+                                        </div>
+                                    </div>
+                                </article>
+                            {% empty %}
+                                <p class="text-secondary mb-0">Nenhuma intervenção cadastrada.</p>
+                            {% endfor %}
+                        </div>
+                    </div>
+                </section>
+
+                <section class="card shadow-sm mb-3">
+                    <div class="card-body">
+                        <label class="h5 card-title d-block" for="{{ form.photos.id_for_label }}">
+                            {{ form.photos.label }}
+                        </label>
+                        {{ form.photos }}
+                        <div class="form-text">
+                            Até 10 imagens JPEG ou PNG, com no máximo 10 MB cada.
+                            Em caso de erro, selecione os arquivos novamente.
+                        </div>
+                        {% for error in form.photos.errors %}
+                            <div class="invalid-feedback d-block">{{ error }}</div>
+                        {% endfor %}
+                    </div>
+                </section>
+
+                <button class="btn btn-primary" type="submit">
+                    Gerar relatório Word
+                </button>
+            </form>
         {% endif %}
     </main>
 </body>
