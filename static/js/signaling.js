@@ -5,8 +5,18 @@ const signalingConfig = document.getElementById("signaling-config");
 const hasIndividualAnalysis = (
     signalingConfig.dataset.hasIndividualAnalysis === "true"
 );
+const signalingSurveyRadiusMeters = Number(
+    signalingConfig.dataset.surveyRadiusMeters
+);
 const signalingLayer = L.layerGroup().addTo(map);
 const signalingMarkers = new Map();
+const signalingRadiusCircles = new Map();
+map.createPane("signalingRadiusPane");
+map.getPane("signalingRadiusPane").style.zIndex = "390";
+const signalingRadiusLayer = L.layerGroup();
+const signalingRadiusToggle = document.getElementById(
+    "signaling-radius-toggle"
+);
 
 
 const signalingStatuses = {
@@ -820,6 +830,11 @@ function showPointPopup(marker, point) {
             await postJson(deleteUrl(point.id));
             signalingLayer.removeLayer(marker);
             signalingMarkers.delete(point.id);
+            const radiusCircle = signalingRadiusCircles.get(point.id);
+            if (radiusCircle) {
+                signalingRadiusLayer.removeLayer(radiusCircle);
+                signalingRadiusCircles.delete(point.id);
+            }
             map.closePopup();
         } catch (error) {
             deleteButton.disabled = false;
@@ -963,6 +978,19 @@ function addSignalingMarker(point) {
 
     marker.addTo(signalingLayer);
     signalingMarkers.set(point.id, marker);
+
+    const radiusCircle = L.circle([point.latitude, point.longitude], {
+        pane: "signalingRadiusPane",
+        radius: signalingSurveyRadiusMeters,
+        color: "#0dcaf0",
+        weight: 2,
+        opacity: 0.65,
+        fillColor: "#0dcaf0",
+        fillOpacity: 0.12,
+        interactive: false,
+    });
+    radiusCircle.addTo(signalingRadiusLayer);
+    signalingRadiusCircles.set(point.id, radiusCircle);
 }
 
 
@@ -1047,6 +1075,22 @@ function openCreationPopup(latitude, longitude) {
 
 
 signalingData.forEach(addSignalingMarker);
+
+if (signalingRadiusToggle) {
+    signalingRadiusToggle.addEventListener("change", () => {
+        if (signalingRadiusToggle.checked) {
+            signalingRadiusLayer.addTo(map);
+        } else {
+            signalingRadiusLayer.removeFrom(map);
+        }
+    });
+
+    document.getElementById("clear-filters-button")
+        .addEventListener("click", () => {
+            signalingRadiusToggle.checked = false;
+            signalingRadiusLayer.removeFrom(map);
+        });
+}
 
 const toolsPanelElement = document.getElementById("tools-panel");
 const openToolsButton = document.getElementById("open-tools-panel");

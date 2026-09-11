@@ -8,7 +8,7 @@ from analysis.spatial import haversine_distance_meters
 from signaling.models import SignalingIntervention, SignalingPoint
 
 
-SIGNALING_SURVEY_RADIUS_METERS = 50
+SIGNALING_SURVEY_RADIUS_METERS = 40
 ANALYSIS_SESSION_KEY = "accident_analysis_state"
 
 POINT_STATUS_LABELS = {

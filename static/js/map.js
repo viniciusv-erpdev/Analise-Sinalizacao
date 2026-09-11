@@ -34,7 +34,14 @@ const individualCategoryColors = {
     unavailable: documentStyles.getPropertyValue("--marker-individual-unavailable").trim(),
     other: documentStyles.getPropertyValue("--marker-individual-other").trim(),
 };
+const individualMixedGroupColor = "#6c757d";
 const markersLayer = L.layerGroup().addTo(map);
+let individualCounterLayer = null;
+if (viewMode === "individual") {
+    map.createPane("individualCounterPane");
+    map.getPane("individualCounterPane").style.zIndex = "450";
+    individualCounterLayer = L.layerGroup().addTo(map);
+}
 const filterInputs = Array.from(
     document.querySelectorAll(
         "[data-filter-field], [data-individual-category]"
@@ -257,39 +264,127 @@ function buildIndividualMarkerPopup(point) {
 }
 
 
-const markerRecords = mapData.map(point => {
-    const category = viewMode === "individual"
-        ? point.category
-        : getMarkerCategory(point);
+function groupIndividualAccidentsByCoordinate(accidents) {
+    const groups = new Map();
+
+    accidents.forEach((accident) => {
+        const coordinateKey = `${accident.latitude},${accident.longitude}`;
+        let group = groups.get(coordinateKey);
+        if (!group) {
+            group = {
+                latitude: accident.latitude,
+                longitude: accident.longitude,
+                accidents: [],
+            };
+            groups.set(coordinateKey, group);
+        }
+        group.accidents.push(accident);
+    });
+
+    return Array.from(groups.values());
+}
+
+
+function getVisibleGroupColor(accidents) {
+    const categories = new Set(accidents.map((accident) => accident.category));
+    if (categories.size !== 1) {
+        return individualMixedGroupColor;
+    }
+    const category = categories.values().next().value;
+    return individualCategoryColors[category] || individualCategoryColors.other;
+}
+
+
+function createIndividualCounterIcon(count) {
+    return L.divIcon({
+        className: "individual-marker-counter",
+        html: `<span class="individual-marker-counter__badge">${count}</span>`,
+        iconSize: [26, 20],
+        iconAnchor: [2, 24],
+    });
+}
+
+
+function buildIndividualGroupPopup(record) {
+    const accidents = record.visibleAccidents;
+    const activeIndex = Math.min(record.popupIndex, accidents.length - 1);
+    record.popupIndex = Math.max(0, activeIndex);
+    const popupContent = buildIndividualMarkerPopup(accidents[record.popupIndex]);
+
+    if (accidents.length === 1) {
+        return popupContent;
+    }
+
+    const navigation = document.createElement("div");
+    navigation.className = "map-popup__navigation";
+    const position = document.createElement("span");
+    position.textContent = `${record.popupIndex + 1} / ${accidents.length}`;
+
+    const controls = document.createElement("div");
+    controls.className = "map-popup__navigation-controls";
+    [
+        {label: "Sinistro anterior", direction: -1, text: "◀"},
+        {label: "Próximo sinistro", direction: 1, text: "▶"},
+    ].forEach((control) => {
+        const button = document.createElement("button");
+        button.className = "btn btn-outline-secondary btn-sm";
+        button.type = "button";
+        button.textContent = control.text;
+        button.title = control.label;
+        button.setAttribute("aria-label", control.label);
+        button.addEventListener("click", (event) => {
+            L.DomEvent.stopPropagation(event);
+            record.popupIndex = (
+                record.popupIndex + control.direction + accidents.length
+            ) % accidents.length;
+            record.marker.setPopupContent(buildIndividualGroupPopup(record));
+        });
+        controls.append(button);
+    });
+
+    navigation.append(position, controls);
+    popupContent.append(navigation);
+    L.DomEvent.disableClickPropagation(popupContent);
+    return popupContent;
+}
+
+
+function createClusterMarkerRecord(point) {
+    const category = getMarkerCategory(point);
 
     const coordinates = [
         point.latitude,
         point.longitude
     ];
-    const marker = viewMode === "individual"
-        ? createIndividualMarker(coordinates, category)
-        : L.marker(coordinates, {icon: createMarkerIcon(category)});
-
-    if (viewMode === "individual") {
-        let popupContent = null;
-        marker.bindPopup(
-            () => {
-                if (!popupContent) {
-                    popupContent = buildIndividualMarkerPopup(point);
-                }
-                return popupContent;
-            },
-            {maxWidth: 320}
-        );
-    } else {
-        marker.bindPopup(
-            buildMarkerPopup(point, category),
-            {maxWidth: 320}
-        );
-    }
+    const marker = L.marker(coordinates, {icon: createMarkerIcon(category)});
+    marker.bindPopup(buildMarkerPopup(point, category), {maxWidth: 320});
 
     return {point, marker};
-});
+}
+
+
+function createIndividualMarkerRecord(group) {
+    const coordinates = [group.latitude, group.longitude];
+    const marker = createIndividualMarker(
+        coordinates,
+        group.accidents[0].category
+    );
+    const record = {
+        marker,
+        accidents: group.accidents,
+        visibleAccidents: group.accidents,
+        counterMarker: null,
+        popupIndex: 0,
+        coordinates,
+    };
+    marker.bindPopup(() => buildIndividualGroupPopup(record), {maxWidth: 320});
+    return record;
+}
+
+
+const markerRecords = viewMode === "individual"
+    ? groupIndividualAccidentsByCoordinate(mapData).map(createIndividualMarkerRecord)
+    : mapData.map(createClusterMarkerRecord);
 
 
 function getActiveFilters() {
@@ -314,35 +409,81 @@ function pointMatchesFilters(point, activeFilters) {
 }
 
 
+function updateIndividualCounter(record) {
+    const visibleCount = record.visibleAccidents.length;
+    if (visibleCount < 2) {
+        if (
+            record.counterMarker
+            && individualCounterLayer.hasLayer(record.counterMarker)
+        ) {
+            individualCounterLayer.removeLayer(record.counterMarker);
+        }
+        return;
+    }
+
+    if (!record.counterMarker) {
+        record.counterMarker = L.marker(record.coordinates, {
+            icon: createIndividualCounterIcon(visibleCount),
+            interactive: false,
+            keyboard: false,
+            pane: "individualCounterPane",
+        });
+    } else {
+        record.counterMarker.setIcon(
+            createIndividualCounterIcon(visibleCount)
+        );
+    }
+
+    if (!individualCounterLayer.hasLayer(record.counterMarker)) {
+        individualCounterLayer.addLayer(record.counterMarker);
+    }
+}
+
+
 function applyMapFilters() {
     const activeFilters = getActiveFilters();
     let visibleCount = 0;
 
-    if (viewMode !== "individual") {
-        markersLayer.clearLayers();
-    }
+    if (viewMode === "individual") {
+        markerRecords.forEach((record) => {
+            if (record.marker.isPopupOpen()) {
+                record.marker.closePopup();
+            }
 
-    markerRecords.forEach(({point, marker}) => {
-        const shouldBeVisible = pointMatchesFilters(point, activeFilters);
-        if (viewMode === "individual") {
-            const isVisible = markersLayer.hasLayer(marker);
+            record.visibleAccidents = record.accidents.filter((accident) => (
+                pointMatchesFilters(accident, activeFilters)
+            ));
+            record.popupIndex = 0;
+            const shouldBeVisible = record.visibleAccidents.length > 0;
+            const isVisible = markersLayer.hasLayer(record.marker);
 
             if (shouldBeVisible && !isVisible) {
-                markersLayer.addLayer(marker);
+                markersLayer.addLayer(record.marker);
             } else if (!shouldBeVisible && isVisible) {
-                markersLayer.removeLayer(marker);
+                markersLayer.removeLayer(record.marker);
             }
-        } else if (shouldBeVisible) {
-            markersLayer.addLayer(marker);
-        }
 
-        if (shouldBeVisible) {
-            visibleCount += 1;
-        }
-    });
+            if (shouldBeVisible) {
+                record.marker.setStyle({
+                    fillColor: getVisibleGroupColor(record.visibleAccidents),
+                });
+            }
+            updateIndividualCounter(record);
+            visibleCount += record.visibleAccidents.length;
+        });
+    } else {
+        markersLayer.clearLayers();
+        markerRecords.forEach(({point, marker}) => {
+            const shouldBeVisible = pointMatchesFilters(point, activeFilters);
+            if (shouldBeVisible) {
+                markersLayer.addLayer(marker);
+                visibleCount += 1;
+            }
+        });
+    }
 
     filterCounter.textContent = viewMode === "individual"
-        ? `${visibleCount} de ${markerRecords.length} sinistros exibidos`
+        ? `${visibleCount} de ${mapData.length} sinistros exibidos`
         : `${visibleCount} de ${markerRecords.length} locais exibidos`;
 
     if (viewMode === "individual" && activeFilterCategories) {
