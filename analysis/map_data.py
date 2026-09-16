@@ -156,6 +156,10 @@ def build_individual_accident_item(row: pd.Series) -> dict[str, object]:
         "id": str(row["id"]),
         "latitude": float(row["latitude"]),
         "longitude": float(row["longitude"]),
+        "is_fatal": (
+            not pd.isna(record_type)
+            and str(record_type) == "SINISTRO FATAL"
+        ),
         "record_type": (
             "Não disponível"
             if pd.isna(record_type) or not str(record_type).strip()

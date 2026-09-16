@@ -286,8 +286,21 @@ class IndividualMapDataTests(SimpleTestCase):
         self.assertEqual(data[0]["category"], "collision")
         self.assertSetEqual(
             set(data[0]),
-            {"id", "latitude", "longitude", "record_type", "date", "accident_type", "category", "street", "modes"},
+            {"id", "latitude", "longitude", "is_fatal", "record_type", "date", "accident_type", "category", "street", "modes"},
         )
+
+    def test_individual_payload_identifies_fatality_explicitly(self):
+        accidents = self.make_accidents([
+            [1, "SINISTRO FATAL", "2025-05-14", -21.17, -47.81,
+             "COLISAO", "RUA A", 0, 0, 0, 1, 0, 0, 0, 0],
+            [2, "SINISTRO NAO FATAL", "2025-05-15", -21.18, -47.82,
+             "CHOQUE", "RUA B", 0, 0, 0, 1, 0, 0, 0, 0],
+        ])
+
+        data = build_individual_map_data(accidents)
+
+        self.assertIs(data[0]["is_fatal"], True)
+        self.assertIs(data[1]["is_fatal"], False)
 
     def test_same_coordinates_remain_independent(self):
         rows = [
@@ -553,6 +566,7 @@ class AnalysisViewTests(TestCase):
         self.assertContains(response, 'data-filter-field="collision_3y_met"')
         self.assertContains(response, 'data-filter-field="pedestrian_1y_met"')
         self.assertContains(response, 'data-filter-field="pedestrian_3y_met"')
+        self.assertNotContains(response, "data-individual-gravity")
         self.assertContains(response, 'id="clear-filters-button"')
         self.assertContains(response, 'id="minimize-tools-panel"')
         self.assertContains(response, 'id="open-tools-panel"')
@@ -609,6 +623,7 @@ class AnalysisViewTests(TestCase):
         self.assertContains(response, 'data-max-search-radius-meters="300"')
         self.assertContains(response, 'data-filter-field="collision_1y_met"')
         self.assertNotContains(response, "data-individual-category")
+        self.assertNotContains(response, "data-individual-gravity")
         self.assertEqual(
             response.context["import_summary"],
             {
@@ -686,6 +701,8 @@ class AnalysisViewTests(TestCase):
         self.assertEqual(response.context["import_summary"]["displayed_count"], 1)
         self.assertContains(response, "Filtre os pontos por tipo de sinistro individual")
         self.assertContains(response, "data-individual-category", count=5)
+        self.assertContains(response, "data-individual-gravity", count=3)
+        self.assertContains(response, "GRAVIDADE", count=1)
         self.assertNotContains(response, 'data-filter-field="collision_1y_met"')
         self.assertNotContains(response, 'data-filter-field="collision_3y_met"')
         self.assertNotContains(response, 'data-filter-field="pedestrian_1y_met"')

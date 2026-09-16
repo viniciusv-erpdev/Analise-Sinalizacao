@@ -35,6 +35,11 @@ const individualCategoryColors = {
     other: documentStyles.getPropertyValue("--marker-individual-other").trim(),
 };
 const individualMixedGroupColor = "#6c757d";
+const individualFatalHaloColor = "#dc2626";
+let individualHaloLayer = null;
+if (viewMode === "individual") {
+    individualHaloLayer = L.layerGroup().addTo(map);
+}
 const markersLayer = L.layerGroup().addTo(map);
 let individualCounterLayer = null;
 if (viewMode === "individual") {
@@ -44,8 +49,17 @@ if (viewMode === "individual") {
 }
 const filterInputs = Array.from(
     document.querySelectorAll(
-        "[data-filter-field], [data-individual-category]"
+        "[data-filter-field], [data-individual-category], [data-individual-gravity]"
     )
+);
+const individualCategoryFilterInputs = Array.from(
+    document.querySelectorAll("[data-individual-category]")
+);
+const individualGravityFilterInputs = Array.from(
+    document.querySelectorAll("[data-individual-gravity]")
+);
+const clusterFilterInputs = Array.from(
+    document.querySelectorAll("[data-filter-field]")
 );
 const filterCounter = document.getElementById("filter-counter");
 const clearFiltersButton = document.getElementById(
@@ -97,6 +111,21 @@ function createIndividualMarker(coordinates, category) {
         fillColor: individualCategoryColors[category]
             || individualCategoryColors.other,
         fillOpacity: 0.9,
+        bubblingMouseEvents: false,
+    });
+}
+
+
+function createIndividualFatalHalo(coordinates) {
+    return L.circleMarker(coordinates, {
+        renderer: individualRenderer,
+        radius: 13,
+        color: individualFatalHaloColor,
+        weight: 1,
+        opacity: 0.8,
+        fillColor: individualFatalHaloColor,
+        fillOpacity: 0.24,
+        interactive: false,
         bubblingMouseEvents: false,
     });
 }
@@ -371,6 +400,9 @@ function createIndividualMarkerRecord(group) {
     );
     const record = {
         marker,
+        haloMarker: IndividualAccidentFilters.hasFatalAccident(group.accidents)
+            ? createIndividualFatalHalo(coordinates)
+            : null,
         accidents: group.accidents,
         visibleAccidents: group.accidents,
         counterMarker: null,
@@ -388,16 +420,20 @@ const markerRecords = viewMode === "individual"
 
 
 function getActiveFilters() {
-    return filterInputs.filter((input) => input.checked);
+    const relevantInputs = viewMode === "individual"
+        ? individualCategoryFilterInputs
+        : clusterFilterInputs;
+    return relevantInputs.filter((input) => input.checked);
+}
+
+
+function getActiveGravityFilter() {
+    const selected = individualGravityFilterInputs.find((input) => input.checked);
+    return selected ? selected.value : "all";
 }
 
 
 function pointMatchesFilters(point, activeFilters) {
-    if (viewMode === "individual") {
-        return activeFilters.length === 0 || activeFilters.some(
-            (input) => point.category === input.dataset.individualCategory
-        );
-    }
     if (activeFilters.length === 0) {
         return true;
     }
@@ -442,6 +478,10 @@ function updateIndividualCounter(record) {
 
 function applyMapFilters() {
     const activeFilters = getActiveFilters();
+    const activeCategories = activeFilters.map(
+        (input) => input.dataset.individualCategory
+    );
+    const activeGravity = getActiveGravityFilter();
     let visibleCount = 0;
 
     if (viewMode === "individual") {
@@ -450,12 +490,33 @@ function applyMapFilters() {
                 record.marker.closePopup();
             }
 
-            record.visibleAccidents = record.accidents.filter((accident) => (
-                pointMatchesFilters(accident, activeFilters)
-            ));
+            record.visibleAccidents = IndividualAccidentFilters.filterVisibleAccidents(
+                record.accidents,
+                activeCategories,
+                activeGravity
+            );
             record.popupIndex = 0;
             const shouldBeVisible = record.visibleAccidents.length > 0;
             const isVisible = markersLayer.hasLayer(record.marker);
+            const shouldShowHalo = (
+                shouldBeVisible
+                && record.haloMarker
+                && IndividualAccidentFilters.hasFatalAccident(
+                    record.visibleAccidents
+                )
+            );
+
+            if (record.haloMarker) {
+                const haloIsVisible = individualHaloLayer.hasLayer(
+                    record.haloMarker
+                );
+                if (shouldShowHalo && !haloIsVisible) {
+                    individualHaloLayer.addLayer(record.haloMarker);
+                    record.haloMarker.bringToBack();
+                } else if (!shouldShowHalo && haloIsVisible) {
+                    individualHaloLayer.removeLayer(record.haloMarker);
+                }
+            }
 
             if (shouldBeVisible && !isVisible) {
                 markersLayer.addLayer(record.marker);
@@ -467,6 +528,7 @@ function applyMapFilters() {
                 record.marker.setStyle({
                     fillColor: getVisibleGroupColor(record.visibleAccidents),
                 });
+                record.marker.bringToFront();
             }
             updateIndividualCounter(record);
             visibleCount += record.visibleAccidents.length;
@@ -497,9 +559,15 @@ function applyMapFilters() {
 
 
 function clearMapFilters() {
-    filterInputs.forEach((input) => {
+    [...individualCategoryFilterInputs, ...clusterFilterInputs].forEach((input) => {
         input.checked = false;
     });
+    const allGravityInput = individualGravityFilterInputs.find(
+        (input) => input.value === "all"
+    );
+    if (allGravityInput) {
+        allGravityInput.checked = true;
+    }
     applyMapFilters();
 }
 
@@ -517,6 +585,8 @@ function createMapLegend() {
             <div class="map-legend__item"><span class="map-legend__dot map-legend__dot--individual-collision"></span>Colisão</div>
             <div class="map-legend__item"><span class="map-legend__dot map-legend__dot--individual-unavailable"></span>Não disponível</div>
             <div class="map-legend__item"><span class="map-legend__dot map-legend__dot--individual-other"></span>Outros</div>
+            <div class="map-legend__item"><span class="map-legend__common-marker"></span>Sem halo: sinistro não fatal</div>
+            <div class="map-legend__item"><span class="map-legend__fatal-halo"></span>Halo vermelho: há fatal entre os sinistros visíveis</div>
         ` : `
             <strong>Legenda</strong>
             <div class="map-legend__item"><span class="map-legend__dot map-legend__dot--collision"></span>Colisões</div>
