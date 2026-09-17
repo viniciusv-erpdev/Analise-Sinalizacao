@@ -486,15 +486,21 @@
             font-size: 12px;
         }
 
-        .signaling-condition-options {
+        .signaling-condition-options,
+        .signaling-intervention-actions {
             display: grid;
             grid-template-columns: 1fr 1fr;
             gap: 7px;
         }
 
-        .signaling-condition-option {
+        .signaling-intervention-actions {
+            margin-top: 7px;
+        }
+
+        .signaling-condition-option,
+        .signaling-intervention-actions .btn {
             display: inline-flex;
-            min-height: 38px;
+            height: 38px;
             gap: 5px;
             align-items: center;
             justify-content: center;
@@ -656,9 +662,8 @@
 
         .map-popup__navigation {
             display: flex;
-            gap: 10px;
             align-items: center;
-            justify-content: flex-end;
+            justify-content: space-between;
             margin-top: 10px;
             padding-top: 8px;
             border-top: 1px solid #dee2e6;
@@ -669,12 +674,42 @@
 
         .map-popup__navigation-controls {
             display: inline-flex;
-            gap: 4px;
+            gap: 6px;
+            align-items: center;
         }
 
-        .map-popup__navigation-controls .btn {
-            min-width: 30px;
-            padding: 2px 6px;
+        .map-popup__navigation-button {
+            display: inline-flex;
+            width: 38px;
+            height: 38px;
+            padding: 7px;
+            align-items: center;
+            justify-content: center;
+            border: 0;
+            border-radius: 50%;
+            color: #47679a;
+            background: transparent;
+            box-shadow: none;
+            cursor: pointer;
+        }
+
+        .map-popup__navigation-button:hover {
+            color: #0d6efd;
+        }
+
+        .map-popup__navigation-button:focus-visible {
+            outline: 2px solid #0d6efd;
+            outline-offset: 1px;
+        }
+
+        .map-popup__navigation-icon {
+            display: block;
+            width: 24px;
+            height: 24px;
+            background: currentColor;
+            -webkit-mask: var(--navigation-icon) center / contain no-repeat;
+            mask: var(--navigation-icon) center / contain no-repeat;
+            pointer-events: none;
         }
 
         .individual-marker-counter {
@@ -972,6 +1007,31 @@
             font-weight: 600;
         }
 
+        .filters-empty-state {
+            display: flex;
+            min-height: 190px;
+            padding: 24px 16px;
+            flex-direction: column;
+            gap: 12px;
+            align-items: center;
+            justify-content: center;
+            color: #6c757d;
+            text-align: center;
+        }
+
+        .filters-empty-state img {
+            width: 42px;
+            height: 42px;
+            object-fit: contain;
+            opacity: 0.7;
+        }
+
+        .filters-empty-state p {
+            max-width: 280px;
+            margin: 0;
+            line-height: 1.45;
+        }
+
         .clear-filters-button {
             width: 100%;
             margin-top: 10px;
@@ -1210,6 +1270,8 @@
     <div
         id="map"
         data-has-active-analysis="{% if import_summary %}true{% else %}false{% endif %}"
+        data-left-arrow-icon-url="{% static 'icons/signaling/left-arrow-button.svg' %}"
+        data-right-arrow-icon-url="{% static 'icons/signaling/right-arrow-button.svg' %}"
     ></div>
 
     <section
@@ -1371,6 +1433,7 @@
                 <div class="upload-feedback upload-success">
                     <strong>Análise concluída</strong>
                     <ul class="upload-result-list">
+                        <li>Nome do arquivo: {{ import_summary.file_names|join:", " }}</li>
                         <li>Arquivos: {{ import_summary.file_count }}</li>
                         {% if view_mode == 'individual' %}
                             <li>Sinistros importados: {{ import_summary.accident_count }}</li>
@@ -1403,6 +1466,16 @@
             data-tools-tab-panel="filters"
             {% if initial_tool_tab != 'filters' %}hidden{% endif %}
         >
+            {% if not import_summary %}
+                <div class="filters-empty-state" role="status">
+                    <img
+                        src="{% static 'icons/signaling/filters-icon.svg' %}"
+                        alt=""
+                        aria-hidden="true"
+                    >
+                    <p>Não foi possível carregar os filtros. Por favor faça o upload de um arquivo csv válido e tente novamente.</p>
+                </div>
+            {% else %}
             {% if view_mode == 'individual' %}
                 <p class="small text-secondary mb-2">
                     Filtre os pontos por tipo de sinistro individual.
@@ -1526,6 +1599,7 @@
             >
                 Limpar filtros
             </button>
+            {% endif %}
         </div>
     </section>
 

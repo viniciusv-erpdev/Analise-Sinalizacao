@@ -310,6 +310,13 @@ class SignalingReportTests(TestCase):
         self.assertEqual(len(response.context["survey"]["interventions"]), 2)
         self.assertContains(response, "Sentido norte")
         self.assertContains(response, "Pintura desgastada")
+        self.assertContains(
+            response,
+            'class="report-intervention border rounded"',
+            count=2,
+        )
+        self.assertContains(response, "ok-signaling-report.svg")
+        self.assertContains(response, "wrong-signaling-report.svg")
 
     def test_report_without_individual_analysis_is_friendly(self):
         point = self.create_point()

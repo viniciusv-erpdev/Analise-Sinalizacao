@@ -1,3 +1,4 @@
+{% load static %}
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -15,7 +16,56 @@
         .report-note { white-space: pre-wrap; overflow-wrap: anywhere; }
         .report-accidents { max-height: 430px; overflow-y: auto; }
         .report-chart { display: block; width: 100%; max-width: 760px; height: auto; margin: 0 auto; }
-        .report-intervention-icon { width: 40px; height: 40px; object-fit: contain; }
+        .report-intervention {
+            display: grid;
+            grid-template-columns: 36px minmax(110px, 0.8fr) minmax(180px, 2fr) auto;
+            gap: 12px;
+            align-items: center;
+            padding: 8px 10px;
+        }
+        .report-intervention-icon-slot {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .report-intervention-icon { width: 32px; height: 32px; object-fit: contain; }
+        .report-intervention-name,
+        .report-intervention-note {
+            min-width: 0;
+            overflow-wrap: anywhere;
+        }
+        .report-intervention-note {
+            margin: 0;
+            line-height: 1.35;
+        }
+        .report-intervention-status {
+            display: inline-flex;
+            gap: 6px;
+            align-items: center;
+            justify-self: end;
+            white-space: nowrap;
+        }
+        .report-intervention-status-icon {
+            width: 18px;
+            height: 18px;
+            object-fit: contain;
+        }
+        @media (max-width: 767.98px) {
+            .report-intervention {
+                grid-template-columns: 32px minmax(0, 1fr) auto;
+                gap: 6px 10px;
+            }
+            .report-intervention-icon-slot {
+                grid-row: 1 / span 2;
+                align-self: start;
+            }
+            .report-intervention-note {
+                grid-column: 2 / 4;
+            }
+            .report-intervention-status {
+                grid-column: 3;
+            }
+        }
     </style>
 </head>
 <body class="bg-light">
@@ -196,28 +246,37 @@
                         <h2 class="h5 card-title">Intervenções</h2>
                         <div class="d-grid gap-2">
                             {% for intervention in survey.interventions %}
-                                <article class="border rounded p-3">
-                                    <div class="d-flex flex-column flex-sm-row gap-3 align-items-sm-start">
+                                <article class="report-intervention border rounded">
+                                    <div class="report-intervention-icon-slot">
                                         {% if intervention.icon_url %}
                                             <img
-                                                class="report-intervention-icon flex-shrink-0"
+                                                class="report-intervention-icon"
                                                 src="{{ intervention.icon_url }}"
                                                 alt=""
                                             >
                                         {% endif %}
-                                        <div class="flex-grow-1">
-                                            <div class="d-flex flex-wrap gap-2 justify-content-between mb-1">
-                                                <strong>{{ intervention.type_label }}</strong>
-                                                <span class="small">
-                                                    Status: <strong>{{ intervention.condition_label }}</strong>
-                                                </span>
-                                            </div>
-                                            <p class="report-note small text-secondary mb-0">
-                                                <strong>Observações:</strong>
-                                                {% if intervention.notes %}{{ intervention.notes }}{% else %}Não informado{% endif %}
-                                            </p>
-                                        </div>
                                     </div>
+                                    <strong class="report-intervention-name">{{ intervention.type_label }}</strong>
+                                    <p class="report-intervention-note report-note small text-secondary">
+                                        <strong>Observações:</strong>
+                                        {% if intervention.notes %}{{ intervention.notes }}{% else %}Não informado{% endif %}
+                                    </p>
+                                    <span class="report-intervention-status small">
+                                        <strong>{{ intervention.condition_label }}</strong>
+                                        {% if intervention.condition == 'OK' %}
+                                            <img
+                                                class="report-intervention-status-icon"
+                                                src="{% static 'icons/signaling/ok-signaling-report.svg' %}"
+                                                alt="Condição adequada"
+                                            >
+                                        {% elif intervention.condition == 'ABSENT' %}
+                                            <img
+                                                class="report-intervention-status-icon"
+                                                src="{% static 'icons/signaling/wrong-signaling-report.svg' %}"
+                                                alt="Condição inadequada"
+                                            >
+                                        {% endif %}
+                                    </span>
                                 </article>
                             {% empty %}
                                 <p class="text-secondary mb-0">Nenhuma intervenção cadastrada.</p>

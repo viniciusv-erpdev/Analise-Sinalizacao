@@ -1,4 +1,5 @@
-const map = L.map("map").setView(
+const mapElement = document.getElementById("map");
+const map = L.map(mapElement).setView(
     [-21.1775, -47.8103],
     12
 );
@@ -21,8 +22,12 @@ const viewMode = JSON.parse(
     document.getElementById("view-mode").textContent
 );
 const hasActiveAnalysis = (
-    document.getElementById("map").dataset.hasActiveAnalysis === "true"
+    mapElement.dataset.hasActiveAnalysis === "true"
 );
+const individualPopupArrowIcons = {
+    previous: mapElement.dataset.leftArrowIconUrl,
+    next: mapElement.dataset.rightArrowIconUrl,
+};
 const DEBUG_INDIVIDUAL_POPUPS = (
     window.localStorage.getItem("debugIndividualPopups") === "1"
 );
@@ -408,15 +413,30 @@ function buildIndividualGroupPopup(record) {
     const controls = document.createElement("div");
     controls.className = "map-popup__navigation-controls";
     [
-        {label: "Sinistro anterior", direction: -1, text: "◀"},
-        {label: "Próximo sinistro", direction: 1, text: "▶"},
+        {
+            label: "Sinistro anterior",
+            direction: -1,
+            iconUrl: individualPopupArrowIcons.previous,
+        },
+        {
+            label: "Próximo sinistro",
+            direction: 1,
+            iconUrl: individualPopupArrowIcons.next,
+        },
     ].forEach((control) => {
         const button = document.createElement("button");
-        button.className = "btn btn-outline-secondary btn-sm";
+        const icon = document.createElement("span");
+        button.className = "map-popup__navigation-button";
         button.type = "button";
-        button.textContent = control.text;
         button.title = control.label;
         button.setAttribute("aria-label", control.label);
+        icon.className = "map-popup__navigation-icon";
+        icon.setAttribute("aria-hidden", "true");
+        icon.style.setProperty(
+            "--navigation-icon",
+            `url("${control.iconUrl}")`
+        );
+        button.append(icon);
         button.addEventListener("click", (event) => {
             L.DomEvent.stopPropagation(event);
             record.popupIndex = IndividualAccidentFilters.movePopupIndex(
@@ -646,9 +666,11 @@ function applyMapFilters() {
         });
     }
 
-    filterCounter.textContent = viewMode === "individual"
-        ? `${visibleCount} de ${mapData.length} sinistros exibidos`
-        : `${visibleCount} de ${markerRecords.length} locais exibidos`;
+    if (filterCounter) {
+        filterCounter.textContent = viewMode === "individual"
+            ? `${visibleCount} de ${mapData.length} sinistros exibidos`
+            : `${visibleCount} de ${markerRecords.length} locais exibidos`;
+    }
 
     if (viewMode === "individual" && activeFilterCategories) {
         activeFilterCategories.textContent = activeFilters.length === 0
@@ -708,8 +730,10 @@ filterInputs.forEach((input) => {
     input.disabled = markerRecords.length === 0;
     input.addEventListener("change", applyMapFilters);
 });
-clearFiltersButton.disabled = markerRecords.length === 0;
-clearFiltersButton.addEventListener("click", clearMapFilters);
+if (clearFiltersButton) {
+    clearFiltersButton.disabled = markerRecords.length === 0;
+    clearFiltersButton.addEventListener("click", clearMapFilters);
+}
 
 if (hasActiveAnalysis) {
     createMapLegend();

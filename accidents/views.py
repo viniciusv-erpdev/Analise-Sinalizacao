@@ -18,6 +18,15 @@ from signaling.services import get_signaling_map_data
 from signaling.surveys import ANALYSIS_SESSION_KEY
 
 
+def _uploaded_csv_names(uploaded_files) -> list[str]:
+    """Retorna os nomes aceitos na ordem do upload, sem a extensão CSV final."""
+    names = []
+    for uploaded_file in uploaded_files:
+        name = uploaded_file.name or ""
+        names.append(name[:-4] if name.lower().endswith(".csv") else name)
+    return names
+
+
 def analysis_view(request):
     results = []
     map_data = []
@@ -45,6 +54,7 @@ def analysis_view(request):
                 individual_metrics = results.attrs.get("individual_metrics", {})
                 import_summary = {
                     "file_count": len(uploaded_files),
+                    "file_names": _uploaded_csv_names(uploaded_files),
                     "accident_count": len(consolidated),
                     "valid_coordinate_count": individual_metrics.get(
                         "valid_coordinate_count",
@@ -61,6 +71,7 @@ def analysis_view(request):
                 map_data = build_map_data(results)
                 import_summary = {
                     "file_count": len(uploaded_files),
+                    "file_names": _uploaded_csv_names(uploaded_files),
                     "accident_count": len(consolidated),
                     "eligible_count": len(results),
                 }

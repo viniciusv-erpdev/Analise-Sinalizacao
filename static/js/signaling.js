@@ -623,16 +623,16 @@ function buildInterventionForm(point) {
                 data-intervention-feedback
                 hidden
             ></div>
-            <div class="d-flex gap-2 mt-3">
+            <div class="signaling-intervention-actions">
                 <button
-                    class="btn btn-success btn-sm flex-fill"
+                    class="btn btn-success btn-sm w-100"
                     type="submit"
                     disabled
                 >
                     Salvar
                 </button>
                 <button
-                    class="btn btn-outline-danger btn-sm flex-fill"
+                    class="btn btn-outline-danger btn-sm w-100"
                     type="button"
                     data-cancel-intervention
                 >Cancelar</button>

@@ -562,15 +562,24 @@ class AnalysisViewTests(TestCase):
         self.assertContains(response, 'id="tools-panel"', count=1)
         self.assertContains(response, 'id="data-tab"')
         self.assertContains(response, 'id="filters-tab"')
-        self.assertContains(response, 'data-filter-field="collision_1y_met"')
-        self.assertContains(response, 'data-filter-field="collision_3y_met"')
-        self.assertContains(response, 'data-filter-field="pedestrian_1y_met"')
-        self.assertContains(response, 'data-filter-field="pedestrian_3y_met"')
+        self.assertNotContains(response, 'data-filter-field="collision_1y_met"')
+        self.assertNotContains(response, 'data-filter-field="collision_3y_met"')
+        self.assertNotContains(response, 'data-filter-field="pedestrian_1y_met"')
+        self.assertNotContains(response, 'data-filter-field="pedestrian_3y_met"')
         self.assertNotContains(response, "data-individual-gravity")
-        self.assertContains(response, 'id="clear-filters-button"')
+        self.assertNotContains(response, 'id="clear-filters-button"')
+        self.assertContains(response, 'class="filters-empty-state"')
+        self.assertContains(response, "filters-icon.svg")
+        self.assertContains(
+            response,
+            "Não foi possível carregar os filtros. Por favor faça o upload "
+            "de um arquivo csv válido e tente novamente.",
+        )
         self.assertContains(response, 'id="minimize-tools-panel"')
         self.assertContains(response, 'id="open-tools-panel"')
         self.assertContains(response, 'data-has-active-analysis="false"')
+        self.assertContains(response, "left-arrow-button.svg")
+        self.assertContains(response, "right-arrow-button.svg")
         self.assertFalse(response.context["has_individual_analysis"])
         self.assertContains(response, 'data-has-individual-analysis="false"')
         self.assertNotContains(response, 'id="signaling-radius-toggle"')
@@ -628,6 +637,7 @@ class AnalysisViewTests(TestCase):
             response.context["import_summary"],
             {
                 "file_count": 1,
+                "file_names": ["valid"],
                 "accident_count": 1,
                 "eligible_count": 1,
             },
@@ -770,11 +780,11 @@ class AnalysisViewTests(TestCase):
         _build_map_data_mock,
     ):
         first = make_upload(
-            "first.csv",
+            "first.part.csv",
             [[1, "31/07/2026", -21.17, -47.81, "COLISAO", "RUA A", 10, "RIBEIRAO PRETO"]],
         )
         second = make_upload(
-            "second.csv",
+            "second.CSV",
             [[2, "31/07/2026", -21.18, -47.82, "COLISAO", "RUA B", 20, "RIBEIRAO PRETO"]],
         )
 
@@ -794,6 +804,14 @@ class AnalysisViewTests(TestCase):
             response.context["import_summary"]["file_count"],
             2,
         )
+        self.assertEqual(
+            response.context["import_summary"]["file_names"],
+            ["first.part", "second"],
+        )
+        self.assertContains(response, "Nome do arquivo: first.part, second")
+        self.assertEqual(response.context["import_summary"]["eligible_count"], 0)
+        self.assertContains(response, 'data-filter-field="collision_1y_met"')
+        self.assertNotContains(response, 'class="filters-empty-state"')
 
     @patch("accidents.views.build_map_data", return_value=[])
     @patch("accidents.views.process_accidents", return_value=pd.DataFrame())
@@ -870,5 +888,6 @@ class AnalysisViewTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "id_sinistro")
+        self.assertNotContains(response, "Nome do arquivo:")
         process_accidents_mock.assert_not_called()
         self.assertEqual(response.context["map_data"], [])
