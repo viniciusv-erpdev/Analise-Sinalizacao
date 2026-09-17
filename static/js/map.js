@@ -23,6 +23,9 @@ const viewMode = JSON.parse(
 const hasActiveAnalysis = (
     document.getElementById("map").dataset.hasActiveAnalysis === "true"
 );
+const DEBUG_INDIVIDUAL_POPUPS = (
+    window.localStorage.getItem("debugIndividualPopups") === "1"
+);
 const individualRenderer = viewMode === "individual"
     ? L.canvas({padding: 0.5})
     : null;
@@ -294,23 +297,7 @@ function buildIndividualMarkerPopup(point) {
 
 
 function groupIndividualAccidentsByCoordinate(accidents) {
-    const groups = new Map();
-
-    accidents.forEach((accident) => {
-        const coordinateKey = `${accident.latitude},${accident.longitude}`;
-        let group = groups.get(coordinateKey);
-        if (!group) {
-            group = {
-                latitude: accident.latitude,
-                longitude: accident.longitude,
-                accidents: [],
-            };
-            groups.set(coordinateKey, group);
-        }
-        group.accidents.push(accident);
-    });
-
-    return Array.from(groups.values());
+    return IndividualAccidentFilters.groupByExactCoordinate(accidents);
 }
 
 
@@ -334,13 +321,82 @@ function createIndividualCounterIcon(count) {
 }
 
 
+function getIndividualPopupDebugState(record, phase, extra = {}) {
+    const popup = record.marker.getPopup();
+    const popupElement = popup && popup.getElement();
+    const navigation = popupElement && popupElement.querySelector(
+        ".map-popup__navigation"
+    );
+    const navigationStyle = navigation
+        ? window.getComputedStyle(navigation)
+        : null;
+    const counterElement = record.counterMarker
+        ? record.counterMarker.getElement()
+        : null;
+    return {
+        phase,
+        coordinateKey: record.coordinateKey,
+        coordinates: record.coordinates,
+        originalIds: record.accidents.map((accident) => accident.id),
+        originalCount: record.accidents.length,
+        visibleIds: record.visibleAccidents.map((accident) => accident.id),
+        visibleAccidentsLength: record.visibleAccidents.length,
+        visibleCount: record.visibleAccidents.length,
+        counterText: counterElement ? counterElement.textContent.trim() : null,
+        counterIsOnMap: Boolean(
+            record.counterMarker
+            && individualCounterLayer.hasLayer(record.counterMarker)
+        ),
+        popupReceivedCount: record.visibleAccidents.length,
+        shouldCreateNavigation: record.visibleAccidents.length > 1,
+        navigationControlsGenerated: navigation
+            ? navigation.querySelectorAll("button").length
+            : 0,
+        navigationInDom: Boolean(navigation && navigation.isConnected),
+        navigationVisible: Boolean(
+            navigation
+            && navigation.isConnected
+            && navigationStyle.display !== "none"
+            && navigationStyle.visibility !== "hidden"
+            && navigation.getClientRects().length > 0
+        ),
+        activeIndex: record.popupIndex,
+        activeCategories: getActiveFilters().map(
+            (input) => input.dataset.individualCategory
+        ),
+        activeGravity: getActiveGravityFilter(),
+        ...extra,
+    };
+}
+
+
+function logIndividualPopupDebug(record, phase, extra = {}) {
+    if (!DEBUG_INDIVIDUAL_POPUPS || !record.debugClicked) {
+        return;
+    }
+    console.info(
+        "[IndividualPopupDebug]",
+        JSON.stringify(
+            getIndividualPopupDebugState(record, phase, extra),
+            null,
+            2
+        )
+    );
+}
+
+
 function buildIndividualGroupPopup(record) {
     const accidents = record.visibleAccidents;
-    const activeIndex = Math.min(record.popupIndex, accidents.length - 1);
-    record.popupIndex = Math.max(0, activeIndex);
+    record.popupIndex = IndividualAccidentFilters.normalizePopupIndex(
+        record.popupIndex,
+        accidents.length
+    );
     const popupContent = buildIndividualMarkerPopup(accidents[record.popupIndex]);
 
     if (accidents.length === 1) {
+        logIndividualPopupDebug(record, "popup-built", {
+            navigationControlsCreated: 0,
+        });
         return popupContent;
     }
 
@@ -363,17 +419,26 @@ function buildIndividualGroupPopup(record) {
         button.setAttribute("aria-label", control.label);
         button.addEventListener("click", (event) => {
             L.DomEvent.stopPropagation(event);
-            record.popupIndex = (
-                record.popupIndex + control.direction + accidents.length
-            ) % accidents.length;
-            record.marker.setPopupContent(buildIndividualGroupPopup(record));
+            record.popupIndex = IndividualAccidentFilters.movePopupIndex(
+                record.popupIndex,
+                accidents.length,
+                control.direction
+            );
+            IndividualAccidentFilters.replaceOpenPopupContent(
+                record.marker.getPopup(),
+                buildIndividualGroupPopup(record)
+            );
         });
         controls.append(button);
     });
 
     navigation.append(position, controls);
     popupContent.append(navigation);
+    record.debugNavigationElement = navigation;
     L.DomEvent.disableClickPropagation(popupContent);
+    logIndividualPopupDebug(record, "popup-built", {
+        navigationControlsCreated: controls.children.length,
+    });
     return popupContent;
 }
 
@@ -408,8 +473,33 @@ function createIndividualMarkerRecord(group) {
         counterMarker: null,
         popupIndex: 0,
         coordinates,
+        coordinateKey: `${group.latitude},${group.longitude}`,
+        debugClicked: false,
     };
+    if (DEBUG_INDIVIDUAL_POPUPS) {
+        marker.on("click", () => {
+            record.debugClicked = true;
+            logIndividualPopupDebug(record, "marker-clicked");
+        });
+    }
     marker.bindPopup(() => buildIndividualGroupPopup(record), {maxWidth: 320});
+    if (DEBUG_INDIVIDUAL_POPUPS) {
+        marker.on("popupopen", () => {
+            window.setTimeout(() => {
+                logIndividualPopupDebug(record, "popup-opened");
+            }, 0);
+        });
+        marker.on("popupclose", () => {
+            logIndividualPopupDebug(record, "popup-closed", {
+                previousNavigationStillInDom: Boolean(
+                    record.debugNavigationElement
+                    && record.debugNavigationElement.isConnected
+                ),
+            });
+            record.debugClicked = false;
+            record.debugNavigationElement = null;
+        });
+    }
     return record;
 }
 
@@ -460,9 +550,21 @@ function updateIndividualCounter(record) {
     if (!record.counterMarker) {
         record.counterMarker = L.marker(record.coordinates, {
             icon: createIndividualCounterIcon(visibleCount),
-            interactive: false,
+            interactive: true,
             keyboard: false,
             pane: "individualCounterPane",
+            bubblingMouseEvents: false,
+        });
+        record.counterMarker.on("click", (event) => {
+            if (DEBUG_INDIVIDUAL_POPUPS) {
+                record.debugClicked = true;
+                logIndividualPopupDebug(record, "counter-clicked");
+            }
+            IndividualAccidentFilters.openGroupPopupFromCounter(
+                record.marker,
+                event.originalEvent || event,
+                L.DomEvent.stopPropagation
+            );
         });
     } else {
         record.counterMarker.setIcon(
@@ -490,20 +592,20 @@ function applyMapFilters() {
                 record.marker.closePopup();
             }
 
-            record.visibleAccidents = IndividualAccidentFilters.filterVisibleAccidents(
+            const groupState = IndividualAccidentFilters.buildVisibleGroupState(
                 record.accidents,
                 activeCategories,
-                activeGravity
+                activeGravity,
+                0
             );
-            record.popupIndex = 0;
-            const shouldBeVisible = record.visibleAccidents.length > 0;
+            record.visibleAccidents = groupState.visibleAccidents;
+            record.popupIndex = groupState.popupIndex;
+            const shouldBeVisible = groupState.visibleCount > 0;
             const isVisible = markersLayer.hasLayer(record.marker);
             const shouldShowHalo = (
                 shouldBeVisible
                 && record.haloMarker
-                && IndividualAccidentFilters.hasFatalAccident(
-                    record.visibleAccidents
-                )
+                && groupState.hasFatal
             );
 
             if (record.haloMarker) {
@@ -531,7 +633,7 @@ function applyMapFilters() {
                 record.marker.bringToFront();
             }
             updateIndividualCounter(record);
-            visibleCount += record.visibleAccidents.length;
+            visibleCount += groupState.visibleCount;
         });
     } else {
         markersLayer.clearLayers();

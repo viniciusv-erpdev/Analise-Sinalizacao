@@ -702,7 +702,7 @@ class AnalysisViewTests(TestCase):
         self.assertContains(response, "Filtre os pontos por tipo de sinistro individual")
         self.assertContains(response, "data-individual-category", count=5)
         self.assertContains(response, "data-individual-gravity", count=3)
-        self.assertContains(response, "GRAVIDADE", count=1)
+        self.assertContains(response, "Gravidade", count=1)
         self.assertNotContains(response, 'data-filter-field="collision_1y_met"')
         self.assertNotContains(response, 'data-filter-field="collision_3y_met"')
         self.assertNotContains(response, 'data-filter-field="pedestrian_1y_met"')

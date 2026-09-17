@@ -32,9 +32,87 @@
         return accidents.some((accident) => accident.is_fatal === true);
     }
 
+    function groupByExactCoordinate(accidents) {
+        const groups = new Map();
+        accidents.forEach((accident) => {
+            const coordinateKey = `${accident.latitude},${accident.longitude}`;
+            let group = groups.get(coordinateKey);
+            if (!group) {
+                group = {
+                    latitude: accident.latitude,
+                    longitude: accident.longitude,
+                    accidents: [],
+                };
+                groups.set(coordinateKey, group);
+            }
+            group.accidents.push(accident);
+        });
+        return Array.from(groups.values());
+    }
+
+    function normalizePopupIndex(index, visibleCount) {
+        if (visibleCount <= 0) {
+            return 0;
+        }
+        return Math.min(Math.max(0, index), visibleCount - 1);
+    }
+
+    function movePopupIndex(index, visibleCount, direction) {
+        if (visibleCount <= 0) {
+            return 0;
+        }
+        return (index + direction + visibleCount) % visibleCount;
+    }
+
+    function replaceOpenPopupContent(popup, content) {
+        const popupElement = popup && popup.getElement();
+        const contentElement = popupElement && popupElement.querySelector(
+            ".leaflet-popup-content"
+        );
+        if (!contentElement) {
+            return false;
+        }
+        contentElement.replaceChildren(content);
+        popup.update();
+        return true;
+    }
+
+    function openGroupPopupFromCounter(marker, event, stopPropagation) {
+        stopPropagation(event);
+        marker.openPopup();
+    }
+
+    function buildVisibleGroupState(
+        accidents,
+        categories,
+        gravity,
+        popupIndex
+    ) {
+        const visibleAccidents = filterVisibleAccidents(
+            accidents,
+            categories,
+            gravity
+        );
+        return {
+            visibleAccidents,
+            visibleCount: visibleAccidents.length,
+            hasFatal: hasFatalAccident(visibleAccidents),
+            popupIndex: normalizePopupIndex(
+                popupIndex,
+                visibleAccidents.length
+            ),
+        };
+    }
+
     return {
+        buildVisibleGroupState,
         filterVisibleAccidents,
+        groupByExactCoordinate,
         hasFatalAccident,
         matchesGravity,
+        movePopupIndex,
+        normalizePopupIndex,
+        openGroupPopupFromCounter,
+        replaceOpenPopupContent,
     };
 }));
