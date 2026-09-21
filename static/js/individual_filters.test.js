@@ -4,19 +4,21 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const {
     buildVisibleGroupState,
+    countPeriodSummary,
     filterVisibleAccidents,
     groupByExactCoordinate,
     hasFatalAccident,
     movePopupIndex,
+    monthsForYear,
     normalizePopupIndex,
     openGroupPopupFromCounter,
     replaceOpenPopupContent,
 } = require("./individual_filters.js");
 
 const mixedGroup = [
-    {id: "1", category: "collision", is_fatal: true},
-    {id: "2", category: "collision", is_fatal: false},
-    {id: "3", category: "pedestrian", is_fatal: false},
+    {id: "1", category: "collision", is_fatal: true, year: 2025, month: 1},
+    {id: "2", category: "collision", is_fatal: false, year: 2025, month: 2},
+    {id: "3", category: "pedestrian", is_fatal: false, year: 2025, month: 2},
 ];
 
 test("Todos preserva fatais e não fatais", () => {
@@ -197,4 +199,71 @@ test("estado único alimenta contador, popup, índice e halo", () => {
     assert.equal(empty.visibleCount, 0);
     assert.equal(empty.hasFatal, false);
     assert.equal(empty.popupIndex, 0);
+});
+
+test("período combina com categoria e gravidade e exclui datas inválidas", () => {
+    const invalidPeriod = {
+        id: "4", category: "collision", is_fatal: false, year: null, month: null,
+    };
+    const accidents = [...mixedGroup, invalidPeriod];
+
+    assert.deepEqual(
+        filterVisibleAccidents(accidents, [], "all", 2025, null)
+            .map(({id}) => id),
+        ["1", "2", "3"]
+    );
+    assert.deepEqual(
+        filterVisibleAccidents(accidents, [], "all", 2025, 2)
+            .map(({id}) => id),
+        ["2", "3"]
+    );
+    assert.deepEqual(
+        filterVisibleAccidents(accidents, ["collision"], "non_fatal", 2025, 2)
+            .map(({id}) => id),
+        ["2"]
+    );
+    assert.deepEqual(
+        filterVisibleAccidents(accidents, [], "all").map(({id}) => id),
+        ["1", "2", "3", "4"]
+    );
+});
+
+test("meses dependem do ano e contagens compactas restauram o total", () => {
+    const periods = [
+        {year: 2024, months: [12]},
+        {year: 2025, months: [1, 2]},
+    ];
+    const summary = {
+        total_count: 4,
+        unperiodized_count: 1,
+        counts: [
+            {year: 2025, month: 1, count: 1},
+            {year: 2025, month: 2, count: 2},
+        ],
+    };
+
+    assert.deepEqual(monthsForYear(periods, 2025), [1, 2]);
+    assert.deepEqual(monthsForYear(periods, 2024), [12]);
+    assert.equal(countPeriodSummary(summary, null, null), 4);
+    assert.equal(countPeriodSummary(summary, 2025, null), 3);
+    assert.equal(countPeriodSummary(summary, 2025, 2), 2);
+    assert.equal(countPeriodSummary(summary, 2024, null), 0);
+});
+
+test("estado do grupo usa período antes de contador, popup e halo", () => {
+    const january = buildVisibleGroupState(
+        mixedGroup, [], "all", 2, 2025, 1
+    );
+    const february = buildVisibleGroupState(
+        mixedGroup, [], "all", january.popupIndex, 2025, 2
+    );
+
+    assert.deepEqual(january.visibleAccidents.map(({id}) => id), ["1"]);
+    assert.equal(january.visibleCount, 1);
+    assert.equal(january.hasFatal, true);
+    assert.equal(january.popupIndex, 0);
+    assert.deepEqual(february.visibleAccidents.map(({id}) => id), ["2", "3"]);
+    assert.equal(february.visibleCount, 2);
+    assert.equal(february.hasFatal, false);
+    assert.equal(february.popupIndex, 0);
 });

@@ -29,6 +29,10 @@ from analysis.results import (
 from analysis.location import (
     build_location_summary,
 )
+from analysis.periods import (
+    build_cluster_period_summaries,
+    extract_available_periods,
+)
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -113,6 +117,7 @@ def process_individual_accidents(df: pd.DataFrame) -> pd.DataFrame:
         "valid_coordinate_count": len(valid_accidents),
         "internal_filter_count": len(filtered),
     }
+    filtered.attrs["available_periods"] = extract_available_periods(filtered)
     return filtered
 
 
@@ -180,6 +185,19 @@ def process_accidents(df: pd.DataFrame) -> pd.DataFrame:
     analysis_result = build_location_summary(
         clustered_accidents,
         analysis_result,
+    )
+
+    eligible_cluster_ids = set(
+        analysis_result["cluster_id"].astype("int64").tolist()
+    )
+    analysis_result.attrs["available_periods"] = extract_available_periods(
+        valid_coordinates
+    )
+    analysis_result.attrs["cluster_period_summaries"] = (
+        build_cluster_period_summaries(
+            clustered_accidents,
+            eligible_cluster_ids,
+        )
     )
 
     print(

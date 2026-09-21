@@ -34,6 +34,7 @@ def analysis_view(request):
     import_summary = None
     view_mode = "clusters"
     has_individual_analysis = False
+    available_periods = []
 
     if request.method == "POST":
         view_mode = request.POST.get("view_mode", "clusters")
@@ -75,10 +76,12 @@ def analysis_view(request):
                     "accident_count": len(consolidated),
                     "eligible_count": len(results),
                 }
+            available_periods = results.attrs.get("available_periods", [])
             request.session[ANALYSIS_SESSION_KEY] = {
                 "view_mode": view_mode,
                 "map_data": map_data,
                 "import_summary": import_summary,
+                "available_periods": available_periods,
             }
             return redirect("analysis")
         except AccidentImportError as error:
@@ -93,6 +96,7 @@ def analysis_view(request):
             view_mode = analysis_state.get("view_mode", "clusters")
             map_data = analysis_state.get("map_data", [])
             import_summary = analysis_state.get("import_summary")
+            available_periods = analysis_state.get("available_periods", [])
             has_individual_analysis = view_mode == "individual"
 
     context = {
@@ -101,6 +105,7 @@ def analysis_view(request):
         "signaling_map_data": get_signaling_map_data(),
         "import_error": import_error,
         "import_summary": import_summary,
+        "available_periods": available_periods,
         "view_mode": view_mode,
         "has_individual_analysis": has_individual_analysis,
         "individual_filter_categories": INDIVIDUAL_FILTER_CATEGORIES,

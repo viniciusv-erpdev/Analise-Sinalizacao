@@ -974,6 +974,29 @@
             margin-right: 6px;
         }
 
+        .period-filter-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 8px;
+        }
+
+        .period-filter-grid label {
+            min-width: 0;
+            color: #495057;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .period-filter-grid select {
+            margin-top: 3px;
+        }
+
+        @media (max-width: 420px) {
+            .period-filter-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
         .filter-option--category {
             display: flex;
             gap: 7px;
@@ -1476,6 +1499,39 @@
                     <p>Não foi possível carregar os filtros. Por favor faça o upload de um arquivo csv válido e tente novamente.</p>
                 </div>
             {% else %}
+            <fieldset class="filter-group">
+                <legend>Período dos sinistros</legend>
+                <div class="period-filter-grid">
+                    <label for="period-year-filter">
+                        Ano
+                        <select
+                            id="period-year-filter"
+                            class="form-select form-select-sm"
+                            {% if not available_periods %}disabled{% endif %}
+                        >
+                            <option value="">Todos os anos</option>
+                            {% for period in available_periods %}
+                                <option value="{{ period.year }}">{{ period.year }}</option>
+                            {% endfor %}
+                        </select>
+                    </label>
+                    <label for="period-month-filter">
+                        Mês
+                        <select
+                            id="period-month-filter"
+                            class="form-select form-select-sm"
+                            disabled
+                        >
+                            <option value="">Todos os meses</option>
+                        </select>
+                    </label>
+                </div>
+                {% if not available_periods %}
+                    <p class="small text-secondary mb-0 mt-2">
+                        Período indisponível nos dados carregados.
+                    </p>
+                {% endif %}
+            </fieldset>
             {% if view_mode == 'individual' %}
                 <p class="small text-secondary mb-2">
                     Filtre os pontos por tipo de sinistro individual.
@@ -1618,6 +1674,7 @@
 
     {{ map_data|json_script:"map-data" }}
     {{ view_mode|json_script:"view-mode" }}
+    {{ available_periods|json_script:"available-periods" }}
     {{ signaling_map_data|json_script:"signaling-map-data" }}
     <div
         id="signaling-config"

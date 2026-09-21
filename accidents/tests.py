@@ -1,6 +1,7 @@
 from unittest.mock import patch
 
 import pandas as pd
+from accidents.normalizer import normalize
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import SimpleTestCase, TestCase
 from django.urls import reverse
@@ -17,6 +18,10 @@ from analysis.map_data import build_individual_map_data, build_map_data
 from analysis.pipeline import (
     process_individual_accidents,
     process_accidents,
+)
+from analysis.periods import (
+    build_cluster_period_summaries,
+    extract_available_periods,
 )
 from signaling.surveys import ANALYSIS_SESSION_KEY
 
@@ -267,10 +272,103 @@ class PipelineTests(SimpleTestCase):
         self.assertEqual(result["id"].tolist(), [3])
 
 
+class PeriodDataTests(SimpleTestCase):
+    def test_missing_period_columns_remain_unfiltered_by_default(self):
+        normalized = normalize(pd.DataFrame({"id_sinistro": [1]}))
+
+        self.assertTrue(pd.isna(normalized.loc[0, "year"]))
+        self.assertTrue(pd.isna(normalized.loc[0, "month"]))
+        self.assertEqual(extract_available_periods(normalized), [])
+
+    def test_normalizes_numeric_periods_and_rejects_invalid_values(self):
+        source = pd.DataFrame({
+            "ano_sinistro": ["2025", 2024.0, "2025.5", 0, None],
+            "mes_sinistro": ["01", 12.0, 2, 13, None],
+        })
+
+        normalized = normalize(source)
+
+        self.assertEqual(normalized.loc[0, "year"], 2025)
+        self.assertEqual(normalized.loc[0, "month"], 1)
+        self.assertEqual(normalized.loc[1, "year"], 2024)
+        self.assertEqual(normalized.loc[1, "month"], 12)
+        self.assertTrue(pd.isna(normalized.loc[2, "year"]))
+        self.assertTrue(pd.isna(normalized.loc[3, "year"]))
+        self.assertTrue(pd.isna(normalized.loc[3, "month"]))
+
+    def test_extracts_sorted_months_per_year_and_ignores_invalid_rows(self):
+        accidents = pd.DataFrame({
+            "year": [2025, 2024, 2025, 2024, pd.NA],
+            "month": [2, 12, 1, 12, 3],
+        })
+
+        periods = extract_available_periods(accidents)
+
+        self.assertEqual(periods, [
+            {"year": 2024, "months": [12]},
+            {"year": 2025, "months": [1, 2]},
+        ])
+
+    def test_compacts_only_selected_cluster_periods(self):
+        accidents = pd.DataFrame({
+            "cluster_id": [1, 1, 1, 2],
+            "year": [2025, 2025, pd.NA, 2024],
+            "month": [1, 2, pd.NA, 12],
+        })
+
+        summaries = build_cluster_period_summaries(accidents, {1})
+
+        self.assertEqual(summaries, {
+            1: {
+                "total_count": 3,
+                "unperiodized_count": 1,
+                "counts": [
+                    {"year": 2025, "month": 1, "count": 1},
+                    {"year": 2025, "month": 2, "count": 1},
+                ],
+            },
+        })
+
+    def test_periods_reflect_consolidated_deduplicated_files(self):
+        header = ";".join([*SOURCE_COLUMNS, "ano_sinistro", "mes_sinistro"])
+
+        def upload(name, rows):
+            content = "\n".join([
+                header,
+                *(";".join(str(value) for value in row) for row in rows),
+            ]).encode("utf-8")
+            return SimpleUploadedFile(name, content, content_type="text/csv")
+
+        shared = [
+            1, "31/01/2025", -21.17, -47.81, "COLISAO",
+            "RUA A", 10, "RIBEIRAO PRETO", 2025, 1,
+        ]
+        consolidated = import_accident_files([
+            upload("first.csv", [shared]),
+            upload("second.csv", [
+                shared,
+                [
+                    2, "01/02/2026", -21.18, -47.82, "COLISAO",
+                    "RUA B", 20, "RIBEIRAO PRETO", 2026, 2,
+                ],
+            ]),
+        ])
+
+        periods = extract_available_periods(normalize(consolidated))
+
+        self.assertEqual(len(consolidated), 2)
+        self.assertEqual(periods, [
+            {"year": 2025, "months": [1]},
+            {"year": 2026, "months": [2]},
+        ])
+
+
 class IndividualMapDataTests(SimpleTestCase):
     def make_accidents(self, rows):
         dataframe = pd.DataFrame(rows, columns=INDIVIDUAL_COLUMNS)
         dataframe["date"] = pd.to_datetime(dataframe["date"], errors="coerce")
+        dataframe["year"] = dataframe["date"].dt.year.astype("Int64")
+        dataframe["month"] = dataframe["date"].dt.month.astype("Int64")
         return dataframe
 
     def test_valid_accident_generates_one_item_with_required_fields(self):
@@ -286,7 +384,7 @@ class IndividualMapDataTests(SimpleTestCase):
         self.assertEqual(data[0]["category"], "collision")
         self.assertSetEqual(
             set(data[0]),
-            {"id", "latitude", "longitude", "is_fatal", "record_type", "date", "accident_type", "category", "street", "modes"},
+            {"id", "latitude", "longitude", "year", "month", "is_fatal", "record_type", "date", "accident_type", "category", "street", "modes"},
         )
 
     def test_individual_payload_identifies_fatality_explicitly(self):
@@ -415,6 +513,8 @@ class MapFilterDataTests(SimpleTestCase):
             for index in range(1, 4)
         ]
         dataframe = pd.DataFrame(rows, columns=SOURCE_COLUMNS)
+        dataframe["ano_sinistro"] = [2025, 2025, 2026]
+        dataframe["mes_sinistro"] = [1, 2, 1]
 
         result = build_map_data(process_accidents(dataframe))
 
@@ -423,6 +523,15 @@ class MapFilterDataTests(SimpleTestCase):
         self.assertIs(result[0]["collision_3y_met"], False)
         self.assertIs(result[0]["pedestrian_1y_met"], False)
         self.assertIs(result[0]["pedestrian_3y_met"], False)
+        self.assertEqual(result[0]["period_summary"], {
+            "total_count": 3,
+            "unperiodized_count": 0,
+            "counts": [
+                {"year": 2025, "month": 1, "count": 1},
+                {"year": 2025, "month": 2, "count": 1},
+                {"year": 2026, "month": 1, "count": 1},
+            ],
+        })
 
 
 class HistoricalCriteriaTests(SimpleTestCase):
@@ -567,6 +676,7 @@ class AnalysisViewTests(TestCase):
         self.assertNotContains(response, 'data-filter-field="pedestrian_1y_met"')
         self.assertNotContains(response, 'data-filter-field="pedestrian_3y_met"')
         self.assertNotContains(response, "data-individual-gravity")
+        self.assertNotContains(response, 'id="period-year-filter"')
         self.assertNotContains(response, 'id="clear-filters-button"')
         self.assertContains(response, 'class="filters-empty-state"')
         self.assertContains(response, "filters-icon.svg")
@@ -602,6 +712,10 @@ class AnalysisViewTests(TestCase):
         }
         session.save()
         results = pd.DataFrame({"eligible": [True]})
+        results.attrs["available_periods"] = [
+            {"year": 2025, "months": [1, 2]},
+            {"year": 2026, "months": [1]},
+        ]
         process_accidents_mock.return_value = results
         build_map_data_mock.return_value = self.map_data
         uploaded_file = make_upload(
@@ -631,6 +745,12 @@ class AnalysisViewTests(TestCase):
         self.assertContains(response, 'data-min-search-radius-meters="10"')
         self.assertContains(response, 'data-max-search-radius-meters="300"')
         self.assertContains(response, 'data-filter-field="collision_1y_met"')
+        self.assertContains(response, 'id="period-year-filter"')
+        self.assertContains(response, '<option value="2025">2025</option>', html=True)
+        self.assertEqual(response.context["available_periods"], [
+            {"year": 2025, "months": [1, 2]},
+            {"year": 2026, "months": [1]},
+        ])
         self.assertNotContains(response, "data-individual-category")
         self.assertNotContains(response, "data-individual-gravity")
         self.assertEqual(
@@ -646,6 +766,13 @@ class AnalysisViewTests(TestCase):
         self.assertEqual(
             self.client.session[ANALYSIS_SESSION_KEY]["view_mode"],
             "clusters",
+        )
+        self.assertEqual(
+            self.client.session[ANALYSIS_SESSION_KEY]["available_periods"],
+            [
+                {"year": 2025, "months": [1, 2]},
+                {"year": 2026, "months": [1]},
+            ],
         )
 
     def test_clear_request_removes_transient_individual_analysis(self):
@@ -675,6 +802,9 @@ class AnalysisViewTests(TestCase):
         build_individual_mock,
     ):
         individual_results = pd.DataFrame({"id": [1]})
+        individual_results.attrs["available_periods"] = [
+            {"year": 2026, "months": [7]},
+        ]
         individual_map_data = [{"id": "1", "latitude": -21.17, "longitude": -47.81}]
         process_individual_mock.return_value = individual_results
         build_individual_mock.return_value = individual_map_data
@@ -697,6 +827,10 @@ class AnalysisViewTests(TestCase):
         self.assertEqual(response.context["map_data"], individual_map_data)
         self.assertEqual(response.context["view_mode"], "individual")
         self.assertTrue(response.context["has_individual_analysis"])
+        self.assertEqual(
+            response.context["available_periods"],
+            [{"year": 2026, "months": [7]}],
+        )
         self.assertEqual(
             self.client.session[ANALYSIS_SESSION_KEY]["map_data"],
             individual_map_data,
@@ -812,6 +946,9 @@ class AnalysisViewTests(TestCase):
         self.assertEqual(response.context["import_summary"]["eligible_count"], 0)
         self.assertContains(response, 'data-filter-field="collision_1y_met"')
         self.assertNotContains(response, 'class="filters-empty-state"')
+        self.assertContains(response, 'id="period-year-filter"')
+        self.assertEqual(response.context["available_periods"], [])
+        self.assertContains(response, "Período indisponível nos dados carregados")
 
     @patch("accidents.views.build_map_data", return_value=[])
     @patch("accidents.views.process_accidents", return_value=pd.DataFrame())

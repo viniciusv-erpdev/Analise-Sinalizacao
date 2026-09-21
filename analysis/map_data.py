@@ -83,6 +83,7 @@ def build_map_data(results: pd.DataFrame) -> list[dict]:
     ].copy()
 
     map_data = []
+    period_summaries = results.attrs.get("cluster_period_summaries", {})
 
     for _, row in data.iterrows():
 
@@ -108,6 +109,10 @@ def build_map_data(results: pd.DataFrame) -> list[dict]:
             ),
             "eligible": bool(row["eligible"]),
             "criterion": str(row["criterion"]),
+            "period_summary": period_summaries.get(
+                int(row["cluster_id"]),
+                {"total_count": 0, "unperiodized_count": 0, "counts": []},
+            ),
         }
 
         map_data.append(item)
@@ -151,11 +156,15 @@ def build_individual_accident_item(row: pd.Series) -> dict[str, object]:
     date = row["date"]
     street = row["street"]
     record_type = row["record_type"]
+    year = row.get("year", pd.NA)
+    month = row.get("month", pd.NA)
 
     return {
         "id": str(row["id"]),
         "latitude": float(row["latitude"]),
         "longitude": float(row["longitude"]),
+        "year": None if pd.isna(year) else int(year),
+        "month": None if pd.isna(month) else int(month),
         "is_fatal": (
             not pd.isna(record_type)
             and str(record_type) == "SINISTRO FATAL"

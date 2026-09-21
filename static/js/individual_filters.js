@@ -17,14 +17,64 @@
         return true;
     }
 
-    function filterVisibleAccidents(accidents, categories, gravity) {
+    function matchesPeriod(accident, year, month) {
+        if (year === null || year === undefined || year === "") {
+            return true;
+        }
+        if (accident.year !== Number(year)) {
+            return false;
+        }
+        return (
+            month === null
+            || month === undefined
+            || month === ""
+            || accident.month === Number(month)
+        );
+    }
+
+    function monthsForYear(periods, year) {
+        const selected = periods.find(
+            (period) => Number(period.year) === Number(year)
+        );
+        return selected ? selected.months.map(Number) : [];
+    }
+
+    function countPeriodSummary(summary, year, month) {
+        if (year === null || year === undefined || year === "") {
+            return Number(summary.total_count) || 0;
+        }
+        return (summary.counts || []).reduce((total, period) => {
+            const matches = (
+                Number(period.year) === Number(year)
+                && (
+                    month === null
+                    || month === undefined
+                    || month === ""
+                    || Number(period.month) === Number(month)
+                )
+            );
+            return total + (matches ? Number(period.count) || 0 : 0);
+        }, 0);
+    }
+
+    function filterVisibleAccidents(
+        accidents,
+        categories,
+        gravity,
+        year = null,
+        month = null
+    ) {
         const selectedCategories = new Set(categories);
         return accidents.filter((accident) => {
             const matchesCategory = (
                 selectedCategories.size === 0
                 || selectedCategories.has(accident.category)
             );
-            return matchesCategory && matchesGravity(accident, gravity);
+            return (
+                matchesCategory
+                && matchesGravity(accident, gravity)
+                && matchesPeriod(accident, year, month)
+            );
         });
     }
 
@@ -86,12 +136,16 @@
         accidents,
         categories,
         gravity,
-        popupIndex
+        popupIndex,
+        year = null,
+        month = null
     ) {
         const visibleAccidents = filterVisibleAccidents(
             accidents,
             categories,
-            gravity
+            gravity,
+            year,
+            month
         );
         return {
             visibleAccidents,
@@ -106,10 +160,13 @@
 
     return {
         buildVisibleGroupState,
+        countPeriodSummary,
         filterVisibleAccidents,
         groupByExactCoordinate,
         hasFatalAccident,
         matchesGravity,
+        matchesPeriod,
+        monthsForYear,
         movePopupIndex,
         normalizePopupIndex,
         openGroupPopupFromCounter,

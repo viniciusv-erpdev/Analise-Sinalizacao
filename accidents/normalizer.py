@@ -5,6 +5,8 @@ COLUMN_MAPPING = {
     "id_sinistro": "id",
     "tipo_registro": "record_type",
     "data_sinistro": "date",
+    "ano_sinistro": "year",
+    "mes_sinistro": "month",
     "latitude": "latitude",
     "longitude": "longitude",
     "tp_sinistro_primario": "accident_type",
@@ -87,6 +89,17 @@ def normalize(df: pd.DataFrame) -> pd.DataFrame:
         .map(TYPE_MAPPING)
     )
 
+    for column, minimum, maximum in (
+        ("year", 1, 9999),
+        ("month", 1, 12),
+    ):
+        if column not in df.columns:
+            df[column] = pd.NA
+        numeric = pd.to_numeric(df[column], errors="coerce")
+        valid = numeric.notna() & numeric.eq(numeric.round())
+        valid &= numeric.between(minimum, maximum)
+        df[column] = numeric.where(valid).astype("Int64")
+
     for column in ["record_type", "road_type"]:
         df[column] = (
             df[column]
@@ -136,6 +149,8 @@ def normalize(df: pd.DataFrame) -> pd.DataFrame:
         "record_type",
         "road_type",
         "date",
+        "year",
+        "month",
         "latitude",
         "longitude",
         "accident_type",

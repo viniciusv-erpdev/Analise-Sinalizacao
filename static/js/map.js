@@ -21,6 +21,9 @@ const mapData = JSON.parse(
 const viewMode = JSON.parse(
     document.getElementById("view-mode").textContent
 );
+const availablePeriods = JSON.parse(
+    document.getElementById("available-periods").textContent
+);
 const hasActiveAnalysis = (
     mapElement.dataset.hasActiveAnalysis === "true"
 );
@@ -76,6 +79,12 @@ const clearFiltersButton = document.getElementById(
 const activeFilterCategories = document.getElementById(
     "active-filter-categories"
 );
+const periodYearFilter = document.getElementById("period-year-filter");
+const periodMonthFilter = document.getElementById("period-month-filter");
+const monthLabels = [
+    "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
+    "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro",
+];
 
 
 const markerCategories = {
@@ -198,7 +207,16 @@ function buildCriteriaList(point) {
 }
 
 
-function buildMarkerPopup(point, category) {
+function buildMarkerPopup(point, category, periodState = null) {
+    const periodSection = periodState && periodState.year !== null ? `
+        <div class="map-popup__section">
+            <h3 class="map-popup__section-title">Ocorrências no período</h3>
+            <p class="mb-0">
+                <strong>${periodState.visibleCount}</strong>
+                ${periodState.label}
+            </p>
+        </div>
+    ` : "";
     return `
         <article class="map-popup">
             <h2 class="map-popup__title">${escapeHtml(point.location)}</h2>
@@ -207,6 +225,8 @@ function buildMarkerPopup(point, category) {
             </span>
 
             ${buildCriteriaList(point)}
+
+            ${periodSection}
 
             <div class="map-popup__section">
                 <h3 class="map-popup__section-title">Ocorrências</h3>
@@ -543,6 +563,57 @@ function getActiveGravityFilter() {
 }
 
 
+function getActivePeriod() {
+    const year = periodYearFilter && periodYearFilter.value
+        ? Number(periodYearFilter.value)
+        : null;
+    const month = year !== null && periodMonthFilter && periodMonthFilter.value
+        ? Number(periodMonthFilter.value)
+        : null;
+    return {year, month};
+}
+
+
+function updateMonthOptions() {
+    if (!periodMonthFilter) {
+        return;
+    }
+    const {year} = getActivePeriod();
+    periodMonthFilter.replaceChildren();
+    const allMonths = document.createElement("option");
+    allMonths.value = "";
+    allMonths.textContent = "Todos os meses";
+    periodMonthFilter.append(allMonths);
+
+    IndividualAccidentFilters.monthsForYear(
+        availablePeriods,
+        year
+    ).forEach((month) => {
+        const option = document.createElement("option");
+        option.value = String(month);
+        option.textContent = monthLabels[Number(month) - 1];
+        periodMonthFilter.append(option);
+    });
+    periodMonthFilter.disabled = year === null;
+}
+
+
+function countClusterAccidentsInPeriod(point, year, month) {
+    const summary = point.period_summary || {total_count: 0, counts: []};
+    return IndividualAccidentFilters.countPeriodSummary(summary, year, month);
+}
+
+
+function describeActivePeriod(year, month) {
+    if (year === null) {
+        return "";
+    }
+    return month === null
+        ? `sinistros em ${year}`
+        : `sinistros em ${monthLabels[month - 1]} de ${year}`;
+}
+
+
 function pointMatchesFilters(point, activeFilters) {
     if (activeFilters.length === 0) {
         return true;
@@ -604,6 +675,7 @@ function applyMapFilters() {
         (input) => input.dataset.individualCategory
     );
     const activeGravity = getActiveGravityFilter();
+    const activePeriod = getActivePeriod();
     let visibleCount = 0;
 
     if (viewMode === "individual") {
@@ -616,7 +688,9 @@ function applyMapFilters() {
                 record.accidents,
                 activeCategories,
                 activeGravity,
-                0
+                0,
+                activePeriod.year,
+                activePeriod.month
             );
             record.visibleAccidents = groupState.visibleAccidents;
             record.popupIndex = groupState.popupIndex;
@@ -658,7 +732,31 @@ function applyMapFilters() {
     } else {
         markersLayer.clearLayers();
         markerRecords.forEach(({point, marker}) => {
-            const shouldBeVisible = pointMatchesFilters(point, activeFilters);
+            const visiblePeriodCount = countClusterAccidentsInPeriod(
+                point,
+                activePeriod.year,
+                activePeriod.month
+            );
+            const matchesPeriod = (
+                activePeriod.year === null
+                || visiblePeriodCount > 0
+            );
+            const shouldBeVisible = (
+                pointMatchesFilters(point, activeFilters)
+                && matchesPeriod
+            );
+            marker.setPopupContent(buildMarkerPopup(
+                point,
+                getMarkerCategory(point),
+                {
+                    ...activePeriod,
+                    visibleCount: visiblePeriodCount,
+                    label: describeActivePeriod(
+                        activePeriod.year,
+                        activePeriod.month
+                    ),
+                }
+            ));
             if (shouldBeVisible) {
                 markersLayer.addLayer(marker);
                 visibleCount += 1;
@@ -692,6 +790,10 @@ function clearMapFilters() {
     if (allGravityInput) {
         allGravityInput.checked = true;
     }
+    if (periodYearFilter) {
+        periodYearFilter.value = "";
+    }
+    updateMonthOptions();
     applyMapFilters();
 }
 
@@ -730,6 +832,15 @@ filterInputs.forEach((input) => {
     input.disabled = markerRecords.length === 0;
     input.addEventListener("change", applyMapFilters);
 });
+if (periodYearFilter) {
+    periodYearFilter.addEventListener("change", () => {
+        updateMonthOptions();
+        applyMapFilters();
+    });
+}
+if (periodMonthFilter) {
+    periodMonthFilter.addEventListener("change", applyMapFilters);
+}
 if (clearFiltersButton) {
     clearFiltersButton.disabled = markerRecords.length === 0;
     clearFiltersButton.addEventListener("click", clearMapFilters);
@@ -738,4 +849,5 @@ if (clearFiltersButton) {
 if (hasActiveAnalysis) {
     createMapLegend();
 }
+updateMonthOptions();
 applyMapFilters();
