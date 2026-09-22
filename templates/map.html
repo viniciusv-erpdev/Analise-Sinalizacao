@@ -1458,6 +1458,10 @@
                     <ul class="upload-result-list">
                         <li>Nome do arquivo: {{ import_summary.file_names|join:", " }}</li>
                         <li>Arquivos: {{ import_summary.file_count }}</li>
+                        <li>
+                            Sinistros excluídos por conter exclusivamente registros de ilesos:
+                            {{ import_summary.exclusively_uninjured_excluded_count }}
+                        </li>
                         {% if view_mode == 'individual' %}
                             <li>Sinistros importados: {{ import_summary.accident_count }}</li>
                             <li>Coordenadas válidas: {{ import_summary.valid_coordinate_count }}</li>

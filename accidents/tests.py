@@ -1,3 +1,4 @@
+from io import BytesIO
 from unittest.mock import patch
 
 import pandas as pd
@@ -8,6 +9,8 @@ from django.urls import reverse
 
 from accidents.services import (
     AccidentImportError,
+    EXCLUSIVELY_UNINJURED_EXCLUDED_COUNT_ATTR,
+    exclude_exclusively_uninjured_accidents,
     import_accident_files,
 )
 from analysis.criteria import (
@@ -38,6 +41,15 @@ SOURCE_COLUMNS = [
 ]
 
 
+SEVERITY_SOURCE_COLUMNS = [
+    "qtd_gravidade_fatal",
+    "qtd_gravidade_grave",
+    "qtd_gravidade_leve",
+    "qtd_gravidade_nao_disponivel",
+    "qtd_gravidade_ileso",
+]
+
+
 INDIVIDUAL_COLUMNS = [
     "id",
     "record_type",
@@ -61,7 +73,7 @@ def make_csv(
     rows: list[list[object]],
     encoding: str = "utf-8",
 ) -> bytes:
-    header = ";".join(SOURCE_COLUMNS)
+    header = ";".join([*SOURCE_COLUMNS, *SEVERITY_SOURCE_COLUMNS])
     lines = [
         ";".join(str(value) for value in row)
         for row in rows
@@ -82,6 +94,88 @@ def make_upload(
 
 
 class AccidentImportTests(SimpleTestCase):
+    def severity_frame(self, rows):
+        return pd.DataFrame(rows, columns=[
+            "qtd_gravidade_fatal",
+            "qtd_gravidade_grave",
+            "qtd_gravidade_leve",
+            "qtd_gravidade_nao_disponivel",
+            "qtd_gravidade_ileso",
+        ])
+
+    def test_excludes_only_rows_with_exclusively_uninjured_presence(self):
+        accidents = self.severity_frame([
+            [pd.NA, pd.NA, pd.NA, pd.NA, 2],
+            [1, pd.NA, pd.NA, pd.NA, 2],
+            [pd.NA, 1, pd.NA, pd.NA, 1],
+            [pd.NA, pd.NA, 1, pd.NA, 1],
+            [pd.NA, pd.NA, pd.NA, 1, 1],
+            [pd.NA, pd.NA, pd.NA, pd.NA, pd.NA],
+        ])
+
+        result = exclude_exclusively_uninjured_accidents(accidents)
+
+        self.assertEqual(result.index.tolist(), [0, 1, 2, 3, 4])
+        self.assertEqual(len(result), 5)
+        self.assertEqual(
+            result.attrs[EXCLUSIVELY_UNINJURED_EXCLUDED_COUNT_ATTR],
+            1,
+        )
+
+    def test_zero_in_other_severity_columns_is_not_null(self):
+        accidents = self.severity_frame([
+            [0, pd.NA, pd.NA, pd.NA, 2],
+            [pd.NA, 0, pd.NA, pd.NA, 2],
+            [pd.NA, pd.NA, 0, pd.NA, 2],
+            [pd.NA, pd.NA, pd.NA, 0, 2],
+        ])
+
+        result = exclude_exclusively_uninjured_accidents(accidents)
+
+        self.assertEqual(len(result), 4)
+        self.assertEqual(
+            result.attrs[EXCLUSIVELY_UNINJURED_EXCLUDED_COUNT_ATTR],
+            0,
+        )
+
+    def test_zero_in_uninjured_column_is_present_and_is_excluded(self):
+        accidents = self.severity_frame([
+            [pd.NA, pd.NA, pd.NA, pd.NA, 0],
+        ])
+
+        result = exclude_exclusively_uninjured_accidents(accidents)
+
+        self.assertTrue(result.empty)
+        self.assertEqual(
+            result.attrs[EXCLUSIVELY_UNINJURED_EXCLUDED_COUNT_ATTR],
+            1,
+        )
+
+    def test_empty_and_whitespace_strings_follow_pandas_null_semantics(self):
+        content = (
+            "qtd_gravidade_fatal;qtd_gravidade_grave;"
+            "qtd_gravidade_leve;qtd_gravidade_nao_disponivel;"
+            "qtd_gravidade_ileso\n;;;;\n;;;;   "
+        )
+        parsed = pd.read_csv(BytesIO(content.encode("utf-8")), sep=";")
+
+        self.assertTrue(pd.isna(parsed.loc[0, "qtd_gravidade_ileso"]))
+        self.assertEqual(parsed.loc[1, "qtd_gravidade_ileso"], "   ")
+        result = exclude_exclusively_uninjured_accidents(parsed)
+        self.assertEqual(len(result), 1)
+        self.assertTrue(pd.isna(result.iloc[0]["qtd_gravidade_ileso"]))
+
+    def test_empty_dataframe_is_supported(self):
+        result = exclude_exclusively_uninjured_accidents(
+            self.severity_frame([])
+        )
+
+        self.assertTrue(result.empty)
+        self.assertEqual(
+            result.attrs[EXCLUSIVELY_UNINJURED_EXCLUDED_COUNT_ATTR],
+            0,
+        )
+
     def test_reads_valid_utf8_csv(self):
         uploaded_file = make_upload(
             "utf8.csv",
@@ -121,6 +215,50 @@ class AccidentImportTests(SimpleTestCase):
 
         self.assertEqual(len(result), 1)
         self.assertEqual(result.iloc[0]["logradouro"], "PRIMEIRA RUA")
+
+    def test_deduplication_still_precedes_exclusion(self):
+        first_row = [
+            1, "31/07/2026", -21.17, -47.81, "COLISAO",
+            "PRIMEIRA RUA", 10, "RIBEIRAO PRETO",
+            "", "", "", "", 2,
+        ]
+        second_row = [
+            1, "31/07/2026", -21.18, -47.82, "COLISAO",
+            "SEGUNDA RUA", 20, "RIBEIRAO PRETO",
+            1, "", "", "", 2,
+        ]
+
+        result = import_accident_files([
+            make_upload("first.csv", [first_row]),
+            make_upload("second.csv", [second_row]),
+        ])
+
+        self.assertTrue(result.empty)
+        self.assertEqual(
+            result.attrs[EXCLUSIVELY_UNINJURED_EXCLUDED_COUNT_ATTR],
+            1,
+        )
+
+    def test_multiple_files_share_one_exclusion_count(self):
+        excluded = [
+            1, "31/07/2026", -21.17, -47.81, "COLISAO",
+            "RUA A", 10, "RIBEIRAO PRETO", "", "", "", "", 1,
+        ]
+        retained = [
+            2, "31/07/2026", -21.18, -47.82, "COLISAO",
+            "RUA B", 20, "RIBEIRAO PRETO", 0, "", "", "", 1,
+        ]
+
+        result = import_accident_files([
+            make_upload("first.csv", [excluded]),
+            make_upload("second.csv", [retained]),
+        ])
+
+        self.assertEqual(result["id_sinistro"].tolist(), [2])
+        self.assertEqual(
+            result.attrs[EXCLUSIVELY_UNINJURED_EXCLUDED_COUNT_ATTR],
+            1,
+        )
 
     def test_rejects_file_without_id_column(self):
         content = b"data_sinistro;latitude\n31/07/2026;-21.17"
@@ -330,7 +468,12 @@ class PeriodDataTests(SimpleTestCase):
         })
 
     def test_periods_reflect_consolidated_deduplicated_files(self):
-        header = ";".join([*SOURCE_COLUMNS, "ano_sinistro", "mes_sinistro"])
+        header = ";".join([
+            *SOURCE_COLUMNS,
+            *SEVERITY_SOURCE_COLUMNS,
+            "ano_sinistro",
+            "mes_sinistro",
+        ])
 
         def upload(name, rows):
             content = "\n".join([
@@ -341,7 +484,8 @@ class PeriodDataTests(SimpleTestCase):
 
         shared = [
             1, "31/01/2025", -21.17, -47.81, "COLISAO",
-            "RUA A", 10, "RIBEIRAO PRETO", 2025, 1,
+            "RUA A", 10, "RIBEIRAO PRETO", "", "", "", "", "",
+            2025, 1,
         ]
         consolidated = import_accident_files([
             upload("first.csv", [shared]),
@@ -349,7 +493,8 @@ class PeriodDataTests(SimpleTestCase):
                 shared,
                 [
                     2, "01/02/2026", -21.18, -47.82, "COLISAO",
-                    "RUA B", 20, "RIBEIRAO PRETO", 2026, 2,
+                    "RUA B", 20, "RIBEIRAO PRETO", "", "", "", "", "",
+                    2026, 2,
                 ],
             ]),
         ])
@@ -761,6 +906,7 @@ class AnalysisViewTests(TestCase):
                 "file_names": ["valid"],
                 "accident_count": 1,
                 "eligible_count": 1,
+                "exclusively_uninjured_excluded_count": 0,
             },
         )
         self.assertEqual(response.context["view_mode"], "clusters")
@@ -858,6 +1004,66 @@ class AnalysisViewTests(TestCase):
         self.assertNotContains(response, 'data-filter-field="pedestrian_3y_met"')
         self.assertNotContains(response, "2+ em 1 ano")
         self.assertNotContains(response, "4+ em 3 anos")
+
+    @patch("accidents.views.build_individual_map_data", return_value=[])
+    @patch("accidents.views.process_individual_accidents", return_value=pd.DataFrame())
+    def test_exclusively_uninjured_rows_do_not_reach_individual_pipeline(
+        self,
+        process_individual_mock,
+        _build_individual_mock,
+    ):
+        excluded = [
+            1, "31/07/2026", -21.17, -47.81, "COLISAO",
+            "RUA A", 10, "RIBEIRAO PRETO", "", "", "", "", 2,
+        ]
+        retained = [
+            2, "31/07/2026", -21.18, -47.82, "COLISAO",
+            "RUA B", 20, "RIBEIRAO PRETO", 0, "", "", "", 2,
+        ]
+
+        response = self.client.post(
+            "/",
+            {
+                "files": make_upload("valid.csv", [excluded, retained]),
+                "view_mode": "individual",
+            },
+        )
+
+        processed_input = process_individual_mock.call_args.args[0]
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(processed_input["id_sinistro"].tolist(), [2])
+        response = self.client.get(response.url)
+        self.assertEqual(
+            response.context["import_summary"][
+                "exclusively_uninjured_excluded_count"
+            ],
+            1,
+        )
+
+    @patch("accidents.views.build_map_data", return_value=[])
+    @patch("accidents.views.process_accidents", return_value=pd.DataFrame())
+    def test_exclusively_uninjured_rows_do_not_reach_eligibility_pipeline(
+        self,
+        process_accidents_mock,
+        _build_map_data_mock,
+    ):
+        excluded = [
+            1, "31/07/2026", -21.17, -47.81, "COLISAO",
+            "RUA A", 10, "RIBEIRAO PRETO", "", "", "", "", 2,
+        ]
+        retained = [
+            2, "31/07/2026", -21.18, -47.82, "COLISAO",
+            "RUA B", 20, "RIBEIRAO PRETO", "", 1, "", "", 2,
+        ]
+
+        response = self.client.post(
+            "/",
+            {"files": make_upload("valid.csv", [excluded, retained])},
+        )
+
+        processed_input = process_accidents_mock.call_args.args[0]
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(processed_input["id_sinistro"].tolist(), [2])
 
     @patch("accidents.views.build_individual_map_data", return_value=[])
     @patch("accidents.views.process_individual_accidents")

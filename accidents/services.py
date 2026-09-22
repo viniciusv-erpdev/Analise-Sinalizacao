@@ -13,7 +13,23 @@ REQUIRED_SOURCE_COLUMNS = {
     "logradouro",
     "numero_logradouro",
     "municipio",
+    "qtd_gravidade_fatal",
+    "qtd_gravidade_grave",
+    "qtd_gravidade_leve",
+    "qtd_gravidade_nao_disponivel",
+    "qtd_gravidade_ileso",
 }
+
+EXCLUSIVELY_UNINJURED_EXCLUDED_COUNT_ATTR = (
+    "exclusively_uninjured_excluded_count"
+)
+OTHER_SEVERITY_COLUMNS = (
+    "qtd_gravidade_fatal",
+    "qtd_gravidade_grave",
+    "qtd_gravidade_leve",
+    "qtd_gravidade_nao_disponivel",
+)
+UNINJURED_SEVERITY_COLUMN = "qtd_gravidade_ileso"
 
 
 class AccidentImportError(ValueError):
@@ -42,10 +58,33 @@ def import_accident_files(
         ignore_index=True,
     )
 
-    return consolidated.drop_duplicates(
+    deduplicated = consolidated.drop_duplicates(
         subset=["id_sinistro"],
         keep="first",
     ).reset_index(drop=True)
+    return exclude_exclusively_uninjured_accidents(deduplicated)
+
+
+def exclude_exclusively_uninjured_accidents(
+    accidents: pd.DataFrame,
+) -> pd.DataFrame:
+    """Remove sinistros cuja única gravidade preenchida seja ileso."""
+    required_columns = {*OTHER_SEVERITY_COLUMNS, UNINJURED_SEVERITY_COLUMN}
+    missing_columns = required_columns - set(accidents.columns)
+    if missing_columns:
+        missing_text = ", ".join(sorted(missing_columns))
+        raise AccidentImportError(
+            "Não foi possível aplicar a regra de gravidade; "
+            f"colunas ausentes: {missing_text}."
+        )
+
+    exclusion_mask = accidents[list(OTHER_SEVERITY_COLUMNS)].isna().all(axis=1)
+    exclusion_mask &= accidents[UNINJURED_SEVERITY_COLUMN].notna()
+    filtered = accidents.loc[~exclusion_mask].reset_index(drop=True)
+    filtered.attrs[EXCLUSIVELY_UNINJURED_EXCLUDED_COUNT_ATTR] = int(
+        exclusion_mask.sum()
+    )
+    return filtered
 
 
 def _read_accident_file(

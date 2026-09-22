@@ -4,6 +4,7 @@ from django.shortcuts import redirect, render
 
 from accidents.services import (
     AccidentImportError,
+    EXCLUSIVELY_UNINJURED_EXCLUDED_COUNT_ATTR,
     import_accident_files,
 )
 from analysis.map_data import (
@@ -51,6 +52,10 @@ def analysis_view(request):
             consolidated = import_accident_files(
                 uploaded_files
             )
+            exclusively_uninjured_excluded_count = consolidated.attrs.get(
+                EXCLUSIVELY_UNINJURED_EXCLUDED_COUNT_ATTR,
+                0,
+            )
             if view_mode == "individual":
                 results = process_individual_accidents(consolidated)
                 map_data = build_individual_map_data(results)
@@ -69,6 +74,9 @@ def analysis_view(request):
                         len(results),
                     ),
                     "displayed_count": len(map_data),
+                    "exclusively_uninjured_excluded_count": (
+                        exclusively_uninjured_excluded_count
+                    ),
                 }
             else:
                 results = process_accidents(consolidated)
@@ -78,6 +86,9 @@ def analysis_view(request):
                     "file_names": _uploaded_csv_names(uploaded_files),
                     "accident_count": len(consolidated),
                     "eligible_count": len(results),
+                    "exclusively_uninjured_excluded_count": (
+                        exclusively_uninjured_excluded_count
+                    ),
                 }
             available_periods = results.attrs.get("available_periods", [])
             request.session[ANALYSIS_SESSION_KEY] = {
