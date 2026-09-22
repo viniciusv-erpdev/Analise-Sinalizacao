@@ -3,6 +3,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const {
+    buildReportFilterQuery,
     buildVisibleGroupState,
     countPeriodSummary,
     filterVisibleAccidents,
@@ -14,6 +15,29 @@ const {
     openGroupPopupFromCounter,
     replaceOpenPopupContent,
 } = require("./individual_filters.js");
+
+test("serializa o snapshot dos filtros para o link do relatório", () => {
+    const query = buildReportFilterQuery({
+        analysisId: "analysis-current",
+        year: 2025,
+        month: 2,
+        categories: ["collision", "pedestrian"],
+        gravity: "fatal",
+    });
+    const parameters = new URLSearchParams(query);
+
+    assert.equal(parameters.get("analysis"), "analysis-current");
+    assert.equal(parameters.get("year"), "2025");
+    assert.equal(parameters.get("month"), "2");
+    assert.deepEqual(
+        parameters.getAll("category"),
+        ["collision", "pedestrian"]
+    );
+    assert.equal(parameters.get("gravity"), "fatal");
+    assert.equal(buildReportFilterQuery({
+        year: null, month: null, categories: [], gravity: "all",
+    }), "");
+});
 
 const mixedGroup = [
     {id: "1", category: "collision", is_fatal: true, year: 2025, month: 1},

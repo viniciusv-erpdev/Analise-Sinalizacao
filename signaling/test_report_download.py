@@ -32,6 +32,7 @@ class SignalingReportDownloadTests(TestCase):
     def set_individual_analysis(self, accidents=None):
         session = self.client.session
         session[ANALYSIS_SESSION_KEY] = {
+            "analysis_id": "current-analysis",
             "view_mode": "individual",
             "map_data": accidents or [],
             "import_summary": {},
@@ -59,6 +60,38 @@ class SignalingReportDownloadTests(TestCase):
         content = b"".join(response.streaming_content)
         response.close()
         return content
+
+    def accident_item(
+        self,
+        accident_id,
+        *,
+        latitude=0,
+        year=2025,
+        month=1,
+        category="collision",
+        fatal=False,
+    ):
+        labels = {
+            "collision": "Colisão",
+            "pedestrian": "Atropelamento",
+            "crash": "Choque",
+        }
+        return {
+            "id": accident_id,
+            "latitude": latitude,
+            "longitude": 0,
+            "year": year,
+            "month": month,
+            "is_fatal": fatal,
+            "record_type": (
+                "SINISTRO FATAL" if fatal else "SINISTRO NAO FATAL"
+            ),
+            "date": f"01/{month:02d}/{year}",
+            "accident_type": labels[category],
+            "category": category,
+            "street": "RUA TESTE",
+            "modes": [{"name": "Automóvel", "quantity": 1}],
+        }
 
     def test_get_displays_form_and_automatic_survey_data(self):
         self.set_individual_analysis()
@@ -137,6 +170,109 @@ class SignalingReportDownloadTests(TestCase):
         self.assertIn(f"relatorio_local_{self.point.id}_", response["Content-Disposition"])
         self.assertGreater(len(content), 0)
         self.assertTrue(is_zipfile(BytesIO(content)))
+
+    def test_get_applies_one_collection_to_all_survey_indicators(self):
+        self.set_individual_analysis([
+            self.accident_item("fatal-january", fatal=True),
+            self.accident_item("nonfatal-february", month=2),
+            self.accident_item(
+                "pedestrian-january",
+                category="pedestrian",
+            ),
+            self.accident_item("outside-radius", latitude=0.002),
+        ])
+
+        response = self.client.get(
+            self.url
+            + "?year=2025&month=1&category=collision&gravity=fatal"
+        )
+        survey = response.context["survey"]
+
+        self.assertEqual(survey["total_accidents"], 1)
+        self.assertEqual(survey["summary"]["fatal"], 1)
+        self.assertEqual(survey["summary"]["non_fatal"], 0)
+        self.assertEqual(survey["summary"]["by_type"]["Colisão"], 1)
+        self.assertEqual(
+            [item["id"] for item in survey["accidents"]],
+            ["fatal-january"],
+        )
+        self.assertContains(response, "2025 — Janeiro")
+        self.assertContains(response, "Somente fatais")
+
+    @patch("signaling.views.generate_signaling_report")
+    def test_post_preserves_filters_and_passes_filtered_survey_to_word(
+        self,
+        generator_mock,
+    ):
+        generator_mock.return_value = BytesIO(b"docx")
+        self.set_individual_analysis([
+            self.accident_item("selected", month=2, category="pedestrian"),
+            self.accident_item("hidden", month=1),
+        ])
+
+        response = self.client.post(
+            self.url
+            + "?analysis=current-analysis&year=2025&month=2&"
+            "category=pedestrian&gravity=non_fatal",
+            self.valid_form_data(),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        passed_survey = generator_mock.call_args.args[1]
+        self.assertEqual(
+            [item["id"] for item in passed_survey["accidents"]],
+            ["selected"],
+        )
+        self.assertEqual(passed_survey["total_accidents"], 1)
+        self.assertEqual(
+            passed_survey["filters"]["categories"],
+            "Atropelamento",
+        )
+
+    @patch("signaling.views.generate_signaling_report")
+    def test_invalid_filters_do_not_render_or_generate_report(
+        self,
+        generator_mock,
+    ):
+        self.set_individual_analysis([self.accident_item("current")])
+
+        response = self.client.post(
+            self.url + "?year=1999",
+            self.valid_form_data(),
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertContains(
+            response,
+            "O ano informado não pertence à análise atual.",
+            status_code=400,
+        )
+        generator_mock.assert_not_called()
+
+    def test_filters_from_a_previous_upload_are_rejected(self):
+        self.set_individual_analysis([self.accident_item("current")])
+
+        response = self.client.get(self.url + "?analysis=previous-analysis")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertContains(
+            response,
+            "Os filtros informados pertencem a outra análise.",
+            status_code=400,
+        )
+
+    def test_valid_filters_with_no_matches_generate_zero_report(self):
+        self.set_individual_analysis([
+            self.accident_item("fatal", fatal=True),
+            self.accident_item("nonfatal", fatal=False),
+        ])
+
+        response = self.client.get(
+            self.url + "?year=2025&category=pedestrian"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["survey"]["total_accidents"], 0)
 
     def test_missing_required_fields_renders_form_errors(self):
         self.set_individual_analysis()

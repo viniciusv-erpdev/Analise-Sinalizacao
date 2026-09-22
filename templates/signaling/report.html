@@ -77,7 +77,12 @@
 
         <h1 class="h3 mb-4">Relatório do local</h1>
 
-        {% if not survey %}
+        {% if filter_error %}
+            <div class="alert alert-danger" role="alert">
+                <h2 class="h5">Não foi possível aplicar os filtros do relatório.</h2>
+                <p class="mb-0">{{ filter_error }}</p>
+            </div>
+        {% elif not survey %}
             <div class="alert alert-info" role="status">
                 <h2 class="h5">Não há uma análise de sinistros individuais disponível.</h2>
                 <p class="mb-0">
@@ -147,6 +152,22 @@
                                 {% endfor %}
                             </div>
                         </div>
+                    </div>
+                </section>
+
+                <section class="card shadow-sm mb-3">
+                    <div class="card-body">
+                        <h2 class="h5 card-title">Filtros aplicados</h2>
+                        <dl class="row mb-0">
+                            <dt class="col-sm-4">Período</dt>
+                            <dd class="col-sm-8">{{ survey.filters.period }}</dd>
+                            <dt class="col-sm-4">Categorias</dt>
+                            <dd class="col-sm-8">{{ survey.filters.categories }}</dd>
+                            <dt class="col-sm-4">Gravidade</dt>
+                            <dd class="col-sm-8">{{ survey.filters.gravity }}</dd>
+                            <dt class="col-sm-4">Raio</dt>
+                            <dd class="col-sm-8">{{ survey.radius_meters }} m</dd>
+                        </dl>
                     </div>
                 </section>
 

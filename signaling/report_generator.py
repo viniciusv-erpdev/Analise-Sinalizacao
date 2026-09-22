@@ -147,6 +147,17 @@ def generate_signaling_report(
         _display_value(temporary_data.get("study_objective")),
     )
 
+    filters = survey.get("filters", {})
+    if not isinstance(filters, Mapping):
+        filters = {}
+    document.add_heading("Filtros aplicados", level=1)
+    _add_information_table(document, (
+        ("Período", _display_value(filters.get("period") or "Todos os períodos")),
+        ("Categorias", _display_value(filters.get("categories") or "Todas")),
+        ("Gravidade", _display_value(filters.get("gravity") or "Todas")),
+        ("Raio", f"{signaling_point.search_radius_meters} m"),
+    ))
+
     summary = survey.get("summary", {})
     if not isinstance(summary, Mapping):
         summary = {}

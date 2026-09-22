@@ -143,6 +143,21 @@ class SignalingReportGeneratorTests(TestCase):
         self.assertIn("Incompleta", text)
         self.assertIn("4", text)
 
+    def test_includes_the_same_validated_filter_summary(self):
+        self.survey["filters"] = {
+            "period": "2025 — Janeiro",
+            "categories": "Atropelamento, Colisão",
+            "gravity": "Somente fatais",
+        }
+
+        text = self.document_text(self.generate())
+
+        self.assertIn("Filtros aplicados", text)
+        self.assertIn("2025 — Janeiro", text)
+        self.assertIn("Atropelamento, Colisão", text)
+        self.assertIn("Somente fatais", text)
+        self.assertIn("100 m", text)
+
     def test_includes_intervention_and_notes(self):
         self.survey["interventions"] = [{
             "id": 1,

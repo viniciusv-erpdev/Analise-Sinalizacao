@@ -229,10 +229,14 @@ function deleteUrl(pointId) {
 
 
 function reportUrl(pointId) {
-    return signalingConfig.dataset.reportUrlTemplate.replace(
+    const baseUrl = signalingConfig.dataset.reportUrlTemplate.replace(
         "/0/",
         `/${pointId}/`
     );
+    const query = typeof window.getIndividualReportFilterQuery === "function"
+        ? window.getIndividualReportFilterQuery()
+        : "";
+    return query ? `${baseUrl}?${query}` : baseUrl;
 }
 
 
@@ -482,6 +486,7 @@ function buildExistingPointPopup(point) {
                     <a
                         class="btn btn-outline-primary btn-sm"
                         href="${reportUrl(point.id)}"
+                        data-generate-report
                     >Gerar relatório</a>
                 ` : `
                     <button
@@ -649,6 +654,12 @@ function showPointPopup(marker, point) {
     L.DomEvent.disableScrollPropagation(popupElement);
 
     const statusEditor = popupElement.querySelector("[data-status-editor]");
+    const reportLink = popupElement.querySelector("[data-generate-report]");
+    if (reportLink) {
+        reportLink.addEventListener("click", () => {
+            reportLink.href = reportUrl(point.id);
+        });
+    }
     const searchRadiusInput = popupElement.querySelector("[data-search-radius]");
     const searchRadiusError = popupElement.querySelector(
         "[data-search-radius-error]"

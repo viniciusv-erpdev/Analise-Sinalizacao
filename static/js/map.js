@@ -24,6 +24,9 @@ const viewMode = JSON.parse(
 const availablePeriods = JSON.parse(
     document.getElementById("available-periods").textContent
 );
+const analysisId = JSON.parse(
+    document.getElementById("analysis-id").textContent
+);
 const hasActiveAnalysis = (
     mapElement.dataset.hasActiveAnalysis === "true"
 );
@@ -572,6 +575,23 @@ function getActivePeriod() {
         : null;
     return {year, month};
 }
+
+
+function getIndividualReportFilterQuery() {
+    const {year, month} = getActivePeriod();
+    return IndividualAccidentFilters.buildReportFilterQuery({
+        analysisId,
+        year,
+        month,
+        categories: getActiveFilters().map(
+            (input) => input.dataset.individualCategory
+        ),
+        gravity: getActiveGravityFilter(),
+    });
+}
+
+
+window.getIndividualReportFilterQuery = getIndividualReportFilterQuery;
 
 
 function updateMonthOptions() {

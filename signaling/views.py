@@ -21,6 +21,10 @@ from signaling.report_generator import (
     build_accident_types_chart_data_uri,
     generate_signaling_report,
 )
+from signaling.report_filters import (
+    InvalidIndividualReportFilters,
+    parse_individual_report_filters,
+)
 from signaling.surveys import (
     ANALYSIS_SESSION_KEY,
     build_signaling_survey_from_items,
@@ -42,13 +46,29 @@ def point_report(request: HttpRequest, point_id: int):
     )
     analysis_state = request.session.get(ANALYSIS_SESSION_KEY)
     survey = None
+    filter_error = None
+    report_filters = None
     if (
         isinstance(analysis_state, dict)
         and analysis_state.get("view_mode") == "individual"
         and isinstance(analysis_state.get("map_data"), list)
     ):
         accidents = analysis_state["map_data"]
-        survey = build_signaling_survey_from_items(point, accidents)
+        try:
+            report_filters = parse_individual_report_filters(
+                request.GET,
+                accidents,
+                analysis_state.get("analysis_id"),
+            )
+        except InvalidIndividualReportFilters as error:
+            filter_error = str(error)
+        else:
+            filtered_accidents = report_filters.apply(accidents)
+            survey = build_signaling_survey_from_items(
+                point,
+                filtered_accidents,
+            )
+            survey["filters"] = report_filters.presentation()
 
     form = (
         SignalingReportForm(request.POST, request.FILES)
@@ -100,7 +120,9 @@ def point_report(request: HttpRequest, point_id: int):
             "form": form,
             "generated_on": timezone.localdate(),
             "chart_data_uri": chart_data_uri,
+            "filter_error": filter_error,
         },
+        status=400 if filter_error else 200,
     )
 
 

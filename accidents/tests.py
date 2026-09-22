@@ -706,6 +706,7 @@ class AnalysisViewTests(TestCase):
     ):
         session = self.client.session
         session[ANALYSIS_SESSION_KEY] = {
+            "analysis_id": "old-analysis",
             "view_mode": "individual",
             "map_data": [{"id": "old"}],
             "import_summary": {},
@@ -773,6 +774,10 @@ class AnalysisViewTests(TestCase):
                 {"year": 2025, "months": [1, 2]},
                 {"year": 2026, "months": [1]},
             ],
+        )
+        self.assertNotEqual(
+            self.client.session[ANALYSIS_SESSION_KEY]["analysis_id"],
+            "old-analysis",
         )
 
     def test_clear_request_removes_transient_individual_analysis(self):

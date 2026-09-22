@@ -57,6 +57,28 @@
         }, 0);
     }
 
+    function buildReportFilterQuery({
+        analysisId, year, month, categories, gravity,
+    }) {
+        const parameters = new URLSearchParams();
+        if (analysisId) {
+            parameters.set("analysis", analysisId);
+        }
+        if (year !== null && year !== undefined && year !== "") {
+            parameters.set("year", String(year));
+        }
+        if (month !== null && month !== undefined && month !== "") {
+            parameters.set("month", String(month));
+        }
+        categories.forEach((category) => {
+            parameters.append("category", category);
+        });
+        if (gravity && gravity !== "all") {
+            parameters.set("gravity", gravity);
+        }
+        return parameters.toString();
+    }
+
     function filterVisibleAccidents(
         accidents,
         categories,
@@ -159,6 +181,7 @@
     }
 
     return {
+        buildReportFilterQuery,
         buildVisibleGroupState,
         countPeriodSummary,
         filterVisibleAccidents,

@@ -1,3 +1,5 @@
+import secrets
+
 from django.shortcuts import redirect, render
 
 from accidents.services import (
@@ -35,6 +37,7 @@ def analysis_view(request):
     view_mode = "clusters"
     has_individual_analysis = False
     available_periods = []
+    analysis_id = None
 
     if request.method == "POST":
         view_mode = request.POST.get("view_mode", "clusters")
@@ -78,6 +81,7 @@ def analysis_view(request):
                 }
             available_periods = results.attrs.get("available_periods", [])
             request.session[ANALYSIS_SESSION_KEY] = {
+                "analysis_id": secrets.token_urlsafe(16),
                 "view_mode": view_mode,
                 "map_data": map_data,
                 "import_summary": import_summary,
@@ -97,6 +101,7 @@ def analysis_view(request):
             map_data = analysis_state.get("map_data", [])
             import_summary = analysis_state.get("import_summary")
             available_periods = analysis_state.get("available_periods", [])
+            analysis_id = analysis_state.get("analysis_id")
             has_individual_analysis = view_mode == "individual"
 
     context = {
@@ -106,6 +111,7 @@ def analysis_view(request):
         "import_error": import_error,
         "import_summary": import_summary,
         "available_periods": available_periods,
+        "analysis_id": analysis_id,
         "view_mode": view_mode,
         "has_individual_analysis": has_individual_analysis,
         "individual_filter_categories": INDIVIDUAL_FILTER_CATEGORIES,
