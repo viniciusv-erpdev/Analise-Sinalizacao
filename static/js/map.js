@@ -84,6 +84,10 @@ const activeFilterCategories = document.getElementById(
 );
 const periodYearFilter = document.getElementById("period-year-filter");
 const periodMonthFilter = document.getElementById("period-month-filter");
+const periodYearInputs = Array.from(
+    document.querySelectorAll("[data-period-year]")
+);
+const allYearsInput = document.querySelector("[data-period-all-years]");
 const monthLabels = [
     "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
     "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro",
@@ -211,7 +215,10 @@ function buildCriteriaList(point) {
 
 
 function buildMarkerPopup(point, category, periodState = null) {
-    const periodSection = periodState && periodState.year !== null ? `
+    const hasPeriodFilter = periodState && (
+        periodState.years.length > 0 || periodState.months.length > 0
+    );
+    const periodSection = hasPeriodFilter ? `
         <div class="map-popup__section">
             <h3 class="map-popup__section-title">Ocorrências no período</h3>
             <p class="mb-0">
@@ -567,22 +574,23 @@ function getActiveGravityFilter() {
 
 
 function getActivePeriod() {
-    const year = periodYearFilter && periodYearFilter.value
-        ? Number(periodYearFilter.value)
-        : null;
-    const month = year !== null && periodMonthFilter && periodMonthFilter.value
-        ? Number(periodMonthFilter.value)
-        : null;
-    return {year, month};
+    return {
+        years: periodYearInputs
+            .filter((input) => input.checked)
+            .map((input) => Number(input.value)),
+        months: Array.from(
+            document.querySelectorAll("[data-period-month]:checked")
+        ).map((input) => Number(input.value)),
+    };
 }
 
 
 function getIndividualReportFilterQuery() {
-    const {year, month} = getActivePeriod();
+    const {years, months} = getActivePeriod();
     return IndividualAccidentFilters.buildReportFilterQuery({
         analysisId,
-        year,
-        month,
+        years,
+        months,
         categories: getActiveFilters().map(
             (input) => input.dataset.individualCategory
         ),
@@ -594,43 +602,87 @@ function getIndividualReportFilterQuery() {
 window.getIndividualReportFilterQuery = getIndividualReportFilterQuery;
 
 
+function updatePeriodSummary(container, values, allLabel, itemLabel) {
+    if (!container) {
+        return;
+    }
+    const summary = container.querySelector("[data-period-summary]");
+    summary.textContent = values.length === 0
+        ? allLabel
+        : itemLabel(values);
+}
+
+
 function updateMonthOptions() {
     if (!periodMonthFilter) {
         return;
     }
-    const {year} = getActivePeriod();
-    periodMonthFilter.replaceChildren();
-    const allMonths = document.createElement("option");
-    allMonths.value = "";
-    allMonths.textContent = "Todos os meses";
-    periodMonthFilter.append(allMonths);
-
-    IndividualAccidentFilters.monthsForYear(
+    const monthOptions = periodMonthFilter.querySelector(
+        "[data-period-month-options]"
+    );
+    const selectedMonths = new Set(getActivePeriod().months);
+    const availableMonths = IndividualAccidentFilters.monthsForYears(
         availablePeriods,
-        year
-    ).forEach((month) => {
-        const option = document.createElement("option");
-        option.value = String(month);
-        option.textContent = monthLabels[Number(month) - 1];
-        periodMonthFilter.append(option);
+        getActivePeriod().years
+    );
+    monthOptions.replaceChildren();
+    const allLabel = document.createElement("label");
+    const allInput = document.createElement("input");
+    const allText = document.createElement("span");
+    allInput.type = "checkbox";
+    allInput.dataset.periodAllMonths = "";
+    allInput.checked = !availableMonths.some((month) => selectedMonths.has(month));
+    allText.textContent = "Todos os meses disponíveis";
+    allLabel.append(allInput, allText);
+    monthOptions.append(allLabel);
+    availableMonths.forEach((month) => {
+        const label = document.createElement("label");
+        const input = document.createElement("input");
+        const text = document.createElement("span");
+        input.type = "checkbox";
+        input.value = String(month);
+        input.dataset.periodMonth = "";
+        input.checked = selectedMonths.has(month);
+        text.textContent = monthLabels[month - 1];
+        label.append(input, text);
+        monthOptions.append(label);
     });
-    periodMonthFilter.disabled = year === null;
+    updatePeriodSummaries();
 }
 
 
-function countClusterAccidentsInPeriod(point, year, month) {
+function updatePeriodSummaries() {
+    const {years, months} = getActivePeriod();
+    updatePeriodSummary(
+        periodYearFilter,
+        years,
+        "Todos os anos",
+        (values) => values.length <= 3
+            ? values.join(", ")
+            : `${values.length} anos selecionados`
+    );
+    updatePeriodSummary(
+        periodMonthFilter,
+        months,
+        "Todos os meses disponíveis",
+        (values) => values.length <= 4
+            ? values.map((month) => monthLabels[month - 1].slice(0, 3)).join(", ")
+            : `${values.length} meses selecionados`
+    );
+}
+
+
+function countClusterAccidentsInPeriod(point, years, months) {
     const summary = point.period_summary || {total_count: 0, counts: []};
-    return IndividualAccidentFilters.countPeriodSummary(summary, year, month);
+    return IndividualAccidentFilters.countPeriodSummary(summary, years, months);
 }
 
 
-function describeActivePeriod(year, month) {
-    if (year === null) {
+function describeActivePeriod(years, months) {
+    if (years.length === 0 && months.length === 0) {
         return "";
     }
-    return month === null
-        ? `sinistros em ${year}`
-        : `sinistros em ${monthLabels[month - 1]} de ${year}`;
+    return "sinistros no período selecionado";
 }
 
 
@@ -709,8 +761,8 @@ function applyMapFilters() {
                 activeCategories,
                 activeGravity,
                 0,
-                activePeriod.year,
-                activePeriod.month
+                activePeriod.years,
+                activePeriod.months
             );
             record.visibleAccidents = groupState.visibleAccidents;
             record.popupIndex = groupState.popupIndex;
@@ -754,11 +806,14 @@ function applyMapFilters() {
         markerRecords.forEach(({point, marker}) => {
             const visiblePeriodCount = countClusterAccidentsInPeriod(
                 point,
-                activePeriod.year,
-                activePeriod.month
+                activePeriod.years,
+                activePeriod.months
             );
             const matchesPeriod = (
-                activePeriod.year === null
+                (
+                    activePeriod.years.length === 0
+                    && activePeriod.months.length === 0
+                )
                 || visiblePeriodCount > 0
             );
             const shouldBeVisible = (
@@ -772,8 +827,8 @@ function applyMapFilters() {
                     ...activePeriod,
                     visibleCount: visiblePeriodCount,
                     label: describeActivePeriod(
-                        activePeriod.year,
-                        activePeriod.month
+                        activePeriod.years,
+                        activePeriod.months
                     ),
                 }
             ));
@@ -810,8 +865,16 @@ function clearMapFilters() {
     if (allGravityInput) {
         allGravityInput.checked = true;
     }
-    if (periodYearFilter) {
-        periodYearFilter.value = "";
+    periodYearInputs.forEach((input) => {
+        input.checked = false;
+    });
+    if (allYearsInput) {
+        allYearsInput.checked = true;
+    }
+    if (periodMonthFilter) {
+        periodMonthFilter.querySelectorAll("[data-period-month]").forEach(
+            (input) => { input.checked = false; }
+        );
     }
     updateMonthOptions();
     applyMapFilters();
@@ -853,13 +916,43 @@ filterInputs.forEach((input) => {
     input.addEventListener("change", applyMapFilters);
 });
 if (periodYearFilter) {
-    periodYearFilter.addEventListener("change", () => {
+    periodYearFilter.addEventListener("change", (event) => {
+        if (event.target.matches("[data-period-all-years]")) {
+            periodYearInputs.forEach((input) => {
+                input.checked = false;
+            });
+            event.target.checked = true;
+        } else if (event.target.matches("[data-period-year]")) {
+            allYearsInput.checked = !periodYearInputs.some(
+                (input) => input.checked
+            );
+        } else {
+            return;
+        }
         updateMonthOptions();
         applyMapFilters();
     });
 }
 if (periodMonthFilter) {
-    periodMonthFilter.addEventListener("change", applyMapFilters);
+    periodMonthFilter.addEventListener("change", (event) => {
+        if (event.target.matches("[data-period-all-months]")) {
+            periodMonthFilter.querySelectorAll("[data-period-month]").forEach(
+                (input) => { input.checked = false; }
+            );
+            event.target.checked = true;
+        } else if (event.target.matches("[data-period-month]")) {
+            const allMonths = periodMonthFilter.querySelector(
+                "[data-period-all-months]"
+            );
+            allMonths.checked = !periodMonthFilter.querySelector(
+                "[data-period-month]:checked"
+            );
+        } else {
+            return;
+        }
+        updatePeriodSummaries();
+        applyMapFilters();
+    });
 }
 if (clearFiltersButton) {
     clearFiltersButton.disabled = markerRecords.length === 0;

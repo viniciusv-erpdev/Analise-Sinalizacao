@@ -10,7 +10,7 @@ const {
     groupByExactCoordinate,
     hasFatalAccident,
     movePopupIndex,
-    monthsForYear,
+    monthsForYears,
     normalizePopupIndex,
     openGroupPopupFromCounter,
     replaceOpenPopupContent,
@@ -19,23 +19,23 @@ const {
 test("serializa o snapshot dos filtros para o link do relatório", () => {
     const query = buildReportFilterQuery({
         analysisId: "analysis-current",
-        year: 2025,
-        month: 2,
+        years: [2025, 2026],
+        months: [2, 10],
         categories: ["collision", "pedestrian"],
         gravity: "fatal",
     });
     const parameters = new URLSearchParams(query);
 
     assert.equal(parameters.get("analysis"), "analysis-current");
-    assert.equal(parameters.get("year"), "2025");
-    assert.equal(parameters.get("month"), "2");
+    assert.deepEqual(parameters.getAll("year"), ["2025", "2026"]);
+    assert.deepEqual(parameters.getAll("month"), ["2", "10"]);
     assert.deepEqual(
         parameters.getAll("category"),
         ["collision", "pedestrian"]
     );
     assert.equal(parameters.get("gravity"), "fatal");
     assert.equal(buildReportFilterQuery({
-        year: null, month: null, categories: [], gravity: "all",
+        years: [], months: [], categories: [], gravity: "all",
     }), "");
 });
 
@@ -225,24 +225,26 @@ test("estado único alimenta contador, popup, índice e halo", () => {
     assert.equal(empty.popupIndex, 0);
 });
 
-test("período combina com categoria e gravidade e exclui datas inválidas", () => {
+test("multiperíodo combina com categoria e gravidade e exclui datas inválidas", () => {
     const invalidPeriod = {
         id: "4", category: "collision", is_fatal: false, year: null, month: null,
     };
     const accidents = [...mixedGroup, invalidPeriod];
 
     assert.deepEqual(
-        filterVisibleAccidents(accidents, [], "all", 2025, null)
+        filterVisibleAccidents(accidents, [], "all", [2025], [])
             .map(({id}) => id),
         ["1", "2", "3"]
     );
     assert.deepEqual(
-        filterVisibleAccidents(accidents, [], "all", 2025, 2)
+        filterVisibleAccidents(accidents, [], "all", [2025], [2])
             .map(({id}) => id),
         ["2", "3"]
     );
     assert.deepEqual(
-        filterVisibleAccidents(accidents, ["collision"], "non_fatal", 2025, 2)
+        filterVisibleAccidents(
+            accidents, ["collision"], "non_fatal", [2025], [2]
+        )
             .map(({id}) => id),
         ["2"]
     );
@@ -252,7 +254,7 @@ test("período combina com categoria e gravidade e exclui datas inválidas", () 
     );
 });
 
-test("meses dependem do ano e contagens compactas restauram o total", () => {
+test("meses são a união dos anos e contagens compactas restauram o total", () => {
     const periods = [
         {year: 2024, months: [12]},
         {year: 2025, months: [1, 2]},
@@ -266,20 +268,22 @@ test("meses dependem do ano e contagens compactas restauram o total", () => {
         ],
     };
 
-    assert.deepEqual(monthsForYear(periods, 2025), [1, 2]);
-    assert.deepEqual(monthsForYear(periods, 2024), [12]);
-    assert.equal(countPeriodSummary(summary, null, null), 4);
-    assert.equal(countPeriodSummary(summary, 2025, null), 3);
-    assert.equal(countPeriodSummary(summary, 2025, 2), 2);
-    assert.equal(countPeriodSummary(summary, 2024, null), 0);
+    assert.deepEqual(monthsForYears(periods, [2025]), [1, 2]);
+    assert.deepEqual(monthsForYears(periods, [2024]), [12]);
+    assert.deepEqual(monthsForYears(periods, [2024, 2025]), [1, 2, 12]);
+    assert.deepEqual(monthsForYears(periods, []), [1, 2, 12]);
+    assert.equal(countPeriodSummary(summary, [], []), 4);
+    assert.equal(countPeriodSummary(summary, [2025], []), 3);
+    assert.equal(countPeriodSummary(summary, [2025], [2]), 2);
+    assert.equal(countPeriodSummary(summary, [2024], []), 0);
 });
 
 test("estado do grupo usa período antes de contador, popup e halo", () => {
     const january = buildVisibleGroupState(
-        mixedGroup, [], "all", 2, 2025, 1
+        mixedGroup, [], "all", 2, [2025], [1]
     );
     const february = buildVisibleGroupState(
-        mixedGroup, [], "all", january.popupIndex, 2025, 2
+        mixedGroup, [], "all", january.popupIndex, [2025], [2]
     );
 
     assert.deepEqual(january.visibleAccidents.map(({id}) => id), ["1"]);
@@ -290,4 +294,30 @@ test("estado do grupo usa período antes de contador, popup e halo", () => {
     assert.equal(february.visibleCount, 2);
     assert.equal(february.hasFatal, false);
     assert.equal(february.popupIndex, 0);
+});
+
+test("anos não consecutivos e meses usam somente combinações existentes", () => {
+    const accidents = [
+        {id: "22-jan", year: 2022, month: 1, category: "collision", is_fatal: false},
+        {id: "22-out", year: 2022, month: 10, category: "collision", is_fatal: false},
+        {id: "24-mar", year: 2024, month: 3, category: "collision", is_fatal: true},
+        {id: "26-jun", year: 2026, month: 6, category: "collision", is_fatal: false},
+        {id: "26-feb", year: 2026, month: 2, category: "collision", is_fatal: false},
+    ];
+
+    const visible = buildVisibleGroupState(
+        accidents,
+        [],
+        "all",
+        0,
+        [2022, 2024, 2026],
+        [1, 3, 6, 10]
+    );
+
+    assert.deepEqual(
+        visible.visibleAccidents.map(({id}) => id),
+        ["22-jan", "22-out", "24-mar", "26-jun"]
+    );
+    assert.equal(visible.visibleCount, 4);
+    assert.equal(visible.hasFatal, true);
 });

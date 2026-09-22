@@ -17,59 +17,72 @@
         return true;
     }
 
-    function matchesPeriod(accident, year, month) {
-        if (year === null || year === undefined || year === "") {
-            return true;
+    function normalizeSelections(values) {
+        if (!Array.isArray(values)) {
+            return values === null || values === undefined || values === ""
+                ? []
+                : [Number(values)];
         }
-        if (accident.year !== Number(year)) {
+        return values.map(Number);
+    }
+
+    function matchesPeriod(accident, years, months) {
+        const selectedYears = normalizeSelections(years);
+        const selectedMonths = normalizeSelections(months);
+        if (
+            selectedYears.length > 0
+            && !selectedYears.includes(Number(accident.year))
+        ) {
             return false;
         }
-        return (
-            month === null
-            || month === undefined
-            || month === ""
-            || accident.month === Number(month)
-        );
+        return selectedMonths.length === 0
+            || selectedMonths.includes(Number(accident.month));
     }
 
-    function monthsForYear(periods, year) {
-        const selected = periods.find(
-            (period) => Number(period.year) === Number(year)
-        );
-        return selected ? selected.months.map(Number) : [];
+    function monthsForYears(periods, years) {
+        const selectedYears = new Set(normalizeSelections(years));
+        const months = new Set();
+        periods.forEach((period) => {
+            if (
+                selectedYears.size === 0
+                || selectedYears.has(Number(period.year))
+            ) {
+                period.months.map(Number).forEach((month) => months.add(month));
+            }
+        });
+        return Array.from(months).sort((left, right) => left - right);
     }
 
-    function countPeriodSummary(summary, year, month) {
-        if (year === null || year === undefined || year === "") {
+    function countPeriodSummary(summary, years, months) {
+        const selectedYears = normalizeSelections(years);
+        const selectedMonths = normalizeSelections(months);
+        if (selectedYears.length === 0 && selectedMonths.length === 0) {
             return Number(summary.total_count) || 0;
         }
         return (summary.counts || []).reduce((total, period) => {
             const matches = (
-                Number(period.year) === Number(year)
-                && (
-                    month === null
-                    || month === undefined
-                    || month === ""
-                    || Number(period.month) === Number(month)
-                )
+                (selectedYears.length === 0
+                    || selectedYears.includes(Number(period.year)))
+                && (selectedMonths.length === 0
+                    || selectedMonths.includes(Number(period.month)))
             );
             return total + (matches ? Number(period.count) || 0 : 0);
         }, 0);
     }
 
     function buildReportFilterQuery({
-        analysisId, year, month, categories, gravity,
+        analysisId, years, months, categories, gravity,
     }) {
         const parameters = new URLSearchParams();
         if (analysisId) {
             parameters.set("analysis", analysisId);
         }
-        if (year !== null && year !== undefined && year !== "") {
-            parameters.set("year", String(year));
-        }
-        if (month !== null && month !== undefined && month !== "") {
-            parameters.set("month", String(month));
-        }
+        normalizeSelections(years).forEach((year) => {
+            parameters.append("year", String(year));
+        });
+        normalizeSelections(months).forEach((month) => {
+            parameters.append("month", String(month));
+        });
         categories.forEach((category) => {
             parameters.append("category", category);
         });
@@ -83,8 +96,8 @@
         accidents,
         categories,
         gravity,
-        year = null,
-        month = null
+        years = [],
+        months = []
     ) {
         const selectedCategories = new Set(categories);
         return accidents.filter((accident) => {
@@ -95,7 +108,7 @@
             return (
                 matchesCategory
                 && matchesGravity(accident, gravity)
-                && matchesPeriod(accident, year, month)
+                && matchesPeriod(accident, years, months)
             );
         });
     }
@@ -159,15 +172,15 @@
         categories,
         gravity,
         popupIndex,
-        year = null,
-        month = null
+        years = [],
+        months = []
     ) {
         const visibleAccidents = filterVisibleAccidents(
             accidents,
             categories,
             gravity,
-            year,
-            month
+            years,
+            months
         );
         return {
             visibleAccidents,
@@ -189,7 +202,7 @@
         hasFatalAccident,
         matchesGravity,
         matchesPeriod,
-        monthsForYear,
+        monthsForYears,
         movePopupIndex,
         normalizePopupIndex,
         openGroupPopupFromCounter,

@@ -27,8 +27,8 @@ class InvalidIndividualReportFilters(ValueError):
 
 @dataclass(frozen=True)
 class IndividualReportFilters:
-    year: int | None = None
-    month: int | None = None
+    years: tuple[int, ...] = ()
+    months: tuple[int, ...] = ()
     categories: tuple[str, ...] = ()
     gravity: str = "all"
 
@@ -51,12 +51,18 @@ class IndividualReportFilters:
         ]
 
     def presentation(self) -> dict[str, str]:
-        if self.year is None:
-            period = "Todos os períodos"
-        elif self.month is None:
-            period = str(self.year)
+        if not self.years and not self.months:
+            period = "Todos os períodos disponíveis"
         else:
-            period = f"{self.year} — {MONTH_LABELS[self.month - 1]}"
+            year_text = (
+                _join_labels([str(year) for year in self.years])
+                if self.years else "Todos os anos"
+            )
+            month_text = (
+                _join_labels([MONTH_LABELS[month - 1] for month in self.months])
+                if self.months else "Todos os meses disponíveis"
+            )
+            period = f"Anos: {year_text}. Meses: {month_text}."
         categories = (
             ", ".join(CATEGORY_LABELS[value] for value in self.categories)
             if self.categories
@@ -78,11 +84,9 @@ class IndividualReportFilters:
         return is_fatal if self.gravity == "fatal" else not is_fatal
 
     def _matches_period(self, accident: dict[str, object]) -> bool:
-        if self.year is None:
-            return True
-        if accident.get("year") != self.year:
+        if self.years and accident.get("year") not in self.years:
             return False
-        return self.month is None or accident.get("month") == self.month
+        return not self.months or accident.get("month") in self.months
 
 
 def parse_individual_report_filters(
@@ -99,13 +103,9 @@ def parse_individual_report_filters(
             "Os filtros informados pertencem a outra análise."
         )
 
-    year = _parse_optional_integer(parameters, "year")
-    month = _parse_optional_integer(parameters, "month")
-    if month is not None and year is None:
-        raise InvalidIndividualReportFilters(
-            "Selecione um ano antes de informar o mês."
-        )
-    if month is not None and not 1 <= month <= 12:
+    years = _parse_integer_collection(parameters, "year")
+    months = _parse_integer_collection(parameters, "month")
+    if any(not 1 <= month <= 12 for month in months):
         raise InvalidIndividualReportFilters("O mês informado é inválido.")
 
     available_periods = {
@@ -114,15 +114,21 @@ def parse_individual_report_filters(
         if isinstance(accident.get("year"), int)
         and isinstance(accident.get("month"), int)
     }
-    if year is not None:
-        if not any(item_year == year for item_year, _ in available_periods):
-            raise InvalidIndividualReportFilters(
-                "O ano informado não pertence à análise atual."
-            )
-        if month is not None and (year, month) not in available_periods:
-            raise InvalidIndividualReportFilters(
-                "O mês informado não pertence ao ano selecionado."
-            )
+    available_years = {year for year, _ in available_periods}
+    if set(years) - available_years:
+        raise InvalidIndividualReportFilters(
+            "Um ou mais anos informados não pertencem à análise atual."
+        )
+    relevant_periods = {
+        (year, month)
+        for year, month in available_periods
+        if not years or year in years
+    }
+    available_months = {month for _, month in relevant_periods}
+    if set(months) - available_months:
+        raise InvalidIndividualReportFilters(
+            "Um ou mais meses informados não pertencem aos anos selecionados."
+        )
 
     requested_categories = parameters.getlist("category")
     invalid_categories = set(requested_categories) - set(CATEGORY_LABELS)
@@ -139,24 +145,26 @@ def parse_individual_report_filters(
         raise InvalidIndividualReportFilters(
             "O filtro de gravidade informado é inválido."
         )
-    return IndividualReportFilters(year, month, categories, gravity)
+    return IndividualReportFilters(years, months, categories, gravity)
 
 
-def _parse_optional_integer(
+def _parse_integer_collection(
     parameters: QueryParameters,
     name: str,
-) -> int | None:
-    values = parameters.getlist(name)
-    if not values or values == [""]:
-        return None
-    if len(values) != 1:
-        raise InvalidIndividualReportFilters(
-            f"O parâmetro {name} foi informado mais de uma vez."
-        )
+) -> tuple[int, ...]:
+    values = [value for value in parameters.getlist(name) if value != ""]
+    if not values:
+        return ()
     try:
-        value = int(values[0])
+        parsed = [int(value) for value in values]
     except (TypeError, ValueError) as error:
         raise InvalidIndividualReportFilters(
             f"O parâmetro {name} é inválido."
         ) from error
-    return value
+    return tuple(dict.fromkeys(parsed))
+
+
+def _join_labels(labels: list[str]) -> str:
+    if len(labels) < 2:
+        return labels[0] if labels else ""
+    return f"{', '.join(labels[:-1])} e {labels[-1]}"

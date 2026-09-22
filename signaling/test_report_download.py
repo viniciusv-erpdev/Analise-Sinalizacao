@@ -196,7 +196,7 @@ class SignalingReportDownloadTests(TestCase):
             [item["id"] for item in survey["accidents"]],
             ["fatal-january"],
         )
-        self.assertContains(response, "2025 — Janeiro")
+        self.assertContains(response, "Anos: 2025. Meses: Janeiro.")
         self.assertContains(response, "Somente fatais")
 
     @patch("signaling.views.generate_signaling_report")
@@ -230,6 +230,45 @@ class SignalingReportDownloadTests(TestCase):
         )
 
     @patch("signaling.views.generate_signaling_report")
+    def test_html_and_word_preserve_multiple_years_and_months(
+        self,
+        generator_mock,
+    ):
+        generator_mock.return_value = BytesIO(b"docx")
+        self.set_individual_analysis([
+            self.accident_item("jan-2022", year=2022, month=1),
+            self.accident_item("oct-2024", year=2024, month=10),
+            self.accident_item("jun-2026", year=2026, month=6),
+            self.accident_item("feb-2024", year=2024, month=2),
+            self.accident_item(
+                "mar-2022-outside-radius",
+                year=2022,
+                month=3,
+                latitude=0.002,
+            ),
+        ])
+        query = (
+            "?year=2022&year=2024&year=2026&"
+            "month=1&month=3&month=6&month=10"
+        )
+
+        response = self.client.get(self.url + query)
+        self.assertEqual(
+            [item["id"] for item in response.context["survey"]["accidents"]],
+            ["jan-2022", "oct-2024", "jun-2026"],
+        )
+        self.assertContains(response, "Anos: 2022, 2024 e 2026")
+        self.assertContains(response, "Janeiro, Março, Junho e Outubro")
+
+        response = self.client.post(self.url + query, self.valid_form_data())
+        self.assertEqual(response.status_code, 200)
+        passed_survey = generator_mock.call_args.args[1]
+        self.assertEqual(
+            [item["id"] for item in passed_survey["accidents"]],
+            ["jan-2022", "oct-2024", "jun-2026"],
+        )
+
+    @patch("signaling.views.generate_signaling_report")
     def test_invalid_filters_do_not_render_or_generate_report(
         self,
         generator_mock,
@@ -244,7 +283,7 @@ class SignalingReportDownloadTests(TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertContains(
             response,
-            "O ano informado não pertence à análise atual.",
+            "Um ou mais anos informados não pertencem à análise atual.",
             status_code=400,
         )
         generator_mock.assert_not_called()

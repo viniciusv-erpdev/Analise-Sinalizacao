@@ -41,6 +41,13 @@ class IndividualReportFiltersTests(SimpleTestCase):
         self.assertEqual(self.apply("year=2025"), ["1", "2"])
         self.assertEqual(self.apply("year=2025&month=2"), ["2"])
 
+    def test_filters_multiple_years_and_months_with_or_inside_dimensions(self):
+        self.assertEqual(
+            self.apply("year=2024&year=2025&month=1&month=2"),
+            ["1", "2", "3"],
+        )
+        self.assertEqual(self.apply("month=1"), ["1", "3"])
+
     def test_categories_use_or_and_empty_means_all(self):
         self.assertEqual(
             self.apply("category=collision&category=pedestrian"),
@@ -72,7 +79,6 @@ class IndividualReportFiltersTests(SimpleTestCase):
     def test_invalid_or_stale_parameters_are_rejected(self):
         invalid_queries = (
             "year=text",
-            "month=1",
             "year=2025&month=13",
             "year=1999",
             "year=2025&month=12",
@@ -104,7 +110,29 @@ class IndividualReportFiltersTests(SimpleTestCase):
         )
 
         self.assertEqual(filters.presentation(), {
-            "period": "2025 — Janeiro",
+            "period": "Anos: 2025. Meses: Janeiro.",
             "categories": "Atropelamento, Colisão",
             "gravity": "Somente fatais",
         })
+
+    def test_presentation_describes_multiple_periods_and_unrestricted_values(self):
+        filters = parse_individual_report_filters(
+            QueryDict("year=2024&year=2025&month=1&month=2"),
+            self.accidents,
+        )
+        self.assertEqual(
+            filters.presentation()["period"],
+            "Anos: 2024 e 2025. Meses: Janeiro e Fevereiro.",
+        )
+        self.assertEqual(
+            parse_individual_report_filters(
+                QueryDict("year=2025"), self.accidents
+            ).presentation()["period"],
+            "Anos: 2025. Meses: Todos os meses disponíveis.",
+        )
+        self.assertEqual(
+            parse_individual_report_filters(
+                QueryDict(""), self.accidents
+            ).presentation()["period"],
+            "Todos os períodos disponíveis",
+        )

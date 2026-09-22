@@ -892,7 +892,7 @@ class AnalysisViewTests(TestCase):
         self.assertContains(response, 'data-max-search-radius-meters="300"')
         self.assertContains(response, 'data-filter-field="collision_1y_met"')
         self.assertContains(response, 'id="period-year-filter"')
-        self.assertContains(response, '<option value="2025">2025</option>', html=True)
+        self.assertContains(response, 'value="2025" data-period-year')
         self.assertEqual(response.context["available_periods"], [
             {"year": 2025, "months": [1, 2]},
             {"year": 2026, "months": [1]},
