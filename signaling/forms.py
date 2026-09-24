@@ -1,5 +1,53 @@
 from django import forms
 
+from signaling.characterization import (
+    MAX_PGT_ITEMS, MAX_PGT_LENGTH, validate_report_text,
+)
+
+
+class PGTListWidget(forms.Widget):
+    template_name = "signaling/widgets/pgt_list.html"
+
+    def value_from_datadict(self, data, files, name):
+        if hasattr(data, "getlist"):
+            return data.getlist(name)
+        return data.get(name, [])
+
+    def format_value(self, value):
+        return value if isinstance(value, (list, tuple)) else [""]
+
+    def get_context(self, name, value, attrs):
+        context = super().get_context(name, value, attrs)
+        context["widget"].update(
+            max_items=MAX_PGT_ITEMS,
+            max_length=MAX_PGT_LENGTH,
+        )
+        return context
+
+
+class PGTListField(forms.Field):
+    widget = PGTListWidget
+
+    def clean(self, value):
+        if value is None:
+            return []
+        if not isinstance(value, (list, tuple)):
+            raise forms.ValidationError("Informe uma lista de locais.")
+        if len(value) > MAX_PGT_ITEMS:
+            raise forms.ValidationError(f"Informe no máximo {MAX_PGT_ITEMS} locais.")
+        result = []
+        for item in value:
+            if not isinstance(item, str):
+                raise forms.ValidationError("Cada local deve ser um texto.")
+            validate_report_text(item)
+            if len(item) > MAX_PGT_LENGTH:
+                raise forms.ValidationError(
+                    f"Cada local deve possuir no máximo {MAX_PGT_LENGTH} caracteres."
+                )
+            if item.strip():
+                result.append(item.strip())
+        return result
+
 
 MAX_REPORT_PHOTOS = 10
 MAX_REPORT_PHOTO_SIZE_BYTES = 10 * 1024 * 1024
@@ -21,6 +69,36 @@ class MultipleFileField(forms.FileField):
 
 
 class SignalingReportForm(forms.Form):
+    functional_classification = forms.CharField(
+        label="Classificação Funcional das Vias",
+        required=False,
+        max_length=500,
+        validators=[validate_report_text],
+        widget=forms.TextInput(attrs={"class": "form-control"}),
+    )
+    geometric_configuration = forms.CharField(
+        label="Configuração Geométrica",
+        required=False,
+        max_length=500,
+        validators=[validate_report_text],
+        widget=forms.TextInput(attrs={"class": "form-control"}),
+    )
+    regulated_speed = forms.CharField(
+        label="Velocidade Regulamentada",
+        required=False,
+        max_length=100,
+        validators=[validate_report_text],
+        widget=forms.TextInput(attrs={"class": "form-control"}),
+    )
+    pgts = PGTListField(label="Polos Geradores de Tráfego (PGT)", required=False)
+
+    def characterization_fields(self):
+        return [
+            self[name] for name in (
+                "functional_classification", "geometric_configuration", "regulated_speed",
+            )
+        ]
+
     inspection_address = forms.CharField(
         label="Endereço da vistoria",
         max_length=300,

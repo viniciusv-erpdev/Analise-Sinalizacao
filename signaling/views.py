@@ -9,6 +9,9 @@ from django.utils import timezone
 from django.views.decorators.http import require_POST
 
 from signaling.forms import SignalingReportForm
+from signaling.overpass import (
+    InvalidPGTLocation, OverpassUnavailable, PGT_SEARCH_ERROR, find_nearby_pgts,
+)
 from signaling.intervention_icons import get_intervention_icon_filename
 from signaling.models import (
     MAX_SIGNALING_SEARCH_RADIUS_METERS,
@@ -124,6 +127,31 @@ def point_report(request: HttpRequest, point_id: int):
         },
         status=400 if filter_error else 200,
     )
+
+
+@require_POST
+def search_point_pgts(request: HttpRequest, point_id: int) -> JsonResponse:
+    # O relatório atual compartilha os pontos, sem restrição por proprietário.
+    try:
+        point = SignalingPoint.objects.get(pk=point_id)
+    except SignalingPoint.DoesNotExist:
+        return _api_not_found("Ponto de sinalização")
+    try:
+        results = find_nearby_pgts(
+            latitude=point.latitude,
+            longitude=point.longitude,
+            radius_meters=point.search_radius_meters,
+        )
+    except InvalidPGTLocation:
+        return JsonResponse(
+            {"success": False, "error": "O ponto possui coordenadas ou raio inválidos."},
+            status=400,
+        )
+    except OverpassUnavailable:
+        return JsonResponse(
+            {"success": False, "error": PGT_SEARCH_ERROR}, status=503,
+        )
+    return JsonResponse({"success": True, "results": results})
 
 
 def _read_json(request: HttpRequest) -> dict[str, object] | None:

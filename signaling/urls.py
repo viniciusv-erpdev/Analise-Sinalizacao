@@ -7,6 +7,11 @@ app_name = "signaling"
 
 urlpatterns = [
     path(
+        "points/<int:point_id>/pgts/",
+        views.search_point_pgts,
+        name="search-point-pgts",
+    ),
+    path(
         "points/<int:point_id>/report/",
         views.point_report,
         name="point-report",

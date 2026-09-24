@@ -141,6 +141,18 @@ def generate_signaling_report(
         ("Responsável pela vistoria", _display_value(temporary_data.get("inspector_name"))),
     ))
 
+    document.add_heading("Caracterização do local", level=1)
+    _add_information_table(document, (
+        ("Classificação Funcional das Vias",
+         _display_value(temporary_data.get("functional_classification"))),
+        ("Configuração Geométrica",
+         _display_value(temporary_data.get("geometric_configuration"))),
+        ("Velocidade Regulamentada",
+         _display_value(temporary_data.get("regulated_speed"))),
+        ("Polos Geradores de Tráfego (PGT)",
+         _display_value("\n".join(temporary_data.get("pgts") or []))),
+    ))
+
     document.add_heading("Objetivo", level=1)
     _add_objective_block(
         document,

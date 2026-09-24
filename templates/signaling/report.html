@@ -155,6 +155,40 @@
                     </div>
                 </section>
 
+                <section class="card shadow-sm mb-3" data-characterization
+                         data-pgt-search-url="{% url 'signaling:search-point-pgts' point.id %}">
+                    <div class="card-body">
+                        <h2 class="h5 card-title">Caracterização do local</h2>
+                        <div class="row g-3">
+                            {% for field in form.characterization_fields %}
+                                <div class="col-12">
+                                    <label class="form-label" for="{{ field.id_for_label }}">{{ field.label }}</label>
+                                    {{ field }}
+                                    {% for error in field.errors %}
+                                        <div class="invalid-feedback d-block">{{ error }}</div>
+                                    {% endfor %}
+                                </div>
+                            {% endfor %}
+                            <div class="col-12">
+                                <h3 class="h6">{{ form.pgts.label }}</h3>
+                                <p class="form-text">
+                                    Sugestões do OpenStreetMap no raio atual do ponto ({{ point.search_radius_meters }} m).
+                                    Os dados podem estar incompletos. Revise, edite ou remova os locais encontrados.
+                                    <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">© OpenStreetMap contributors</a>
+                                </p>
+                                <button class="btn btn-outline-primary btn-sm mb-3" type="button" data-pgt-search>
+                                    Buscar locais automaticamente
+                                </button>
+                                {{ form.pgts }}
+                                {% for error in form.pgts.errors %}
+                                    <div class="invalid-feedback d-block">{{ error }}</div>
+                                {% endfor %}
+                                <div data-pgt-notice role="status" aria-live="polite" hidden></div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
                 <section class="card shadow-sm mb-3">
                     <div class="card-body">
                         <h2 class="h5 card-title">Filtros aplicados</h2>
@@ -328,5 +362,6 @@
             </form>
         {% endif %}
     </main>
+    <script src="{% static 'js/report_characterization.js' %}" defer></script>
 </body>
 </html>
