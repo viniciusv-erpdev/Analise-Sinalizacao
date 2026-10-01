@@ -136,7 +136,7 @@ class SignalingReportDownloadTests(TestCase):
         self.assertContains(response, "Sinistros relacionados")
         self.assertContains(response, "A-1")
         self.assertContains(response, "Semáforo")
-        self.assertContains(response, "Status:")
+        self.assertContains(response, "<strong>Adequada</strong>", html=True)
         self.assertContains(response, "Adequada")
         self.assertContains(response, "Boa visibilidade")
         self.assertContains(response, "icons/signaling/traffic-light.svg")
