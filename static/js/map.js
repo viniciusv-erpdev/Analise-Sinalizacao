@@ -37,9 +37,7 @@ const individualPopupArrowIcons = {
 const DEBUG_INDIVIDUAL_POPUPS = (
     window.localStorage.getItem("debugIndividualPopups") === "1"
 );
-const individualRenderer = viewMode === "individual"
-    ? L.canvas({padding: 0.5})
-    : null;
+const accidentRenderer = L.canvas({padding: 0.5});
 const documentStyles = getComputedStyle(document.documentElement);
 const individualCategoryColors = {
     pedestrian: documentStyles.getPropertyValue("--marker-pedestrian").trim(),
@@ -47,6 +45,11 @@ const individualCategoryColors = {
     collision: documentStyles.getPropertyValue("--marker-individual-collision").trim(),
     unavailable: documentStyles.getPropertyValue("--marker-individual-unavailable").trim(),
     other: documentStyles.getPropertyValue("--marker-individual-other").trim(),
+};
+const clusterCategoryColors = {
+    collision: documentStyles.getPropertyValue("--marker-collision").trim(),
+    pedestrian: documentStyles.getPropertyValue("--marker-pedestrian").trim(),
+    both: documentStyles.getPropertyValue("--marker-both").trim(),
 };
 const individualMixedGroupColor = "#6c757d";
 const individualFatalHaloColor = "#dc2626";
@@ -114,20 +117,9 @@ function getMarkerCategory(point) {
 }
 
 
-function createMarkerIcon(category) {
-    return L.divIcon({
-        className: `map-marker map-marker--${category}`,
-        html: '<span class="map-marker__dot" aria-hidden="true"></span>',
-        iconSize: [18, 18],
-        iconAnchor: [9, 9],
-        popupAnchor: [0, -10],
-    });
-}
-
-
 function createIndividualMarker(coordinates, category) {
     return L.circleMarker(coordinates, {
-        renderer: individualRenderer,
+        renderer: accidentRenderer,
         radius: 7,
         color: "#ffffff",
         weight: 2,
@@ -142,7 +134,7 @@ function createIndividualMarker(coordinates, category) {
 
 function createIndividualFatalHalo(coordinates) {
     return L.circleMarker(coordinates, {
-        renderer: individualRenderer,
+        renderer: accidentRenderer,
         radius: 13,
         color: individualFatalHaloColor,
         weight: 1,
@@ -206,7 +198,7 @@ function buildCriteriaList(point) {
 
     return `
         <div class="map-popup__section">
-            <h3 class="map-popup__section-title">Critérios atendidos</h3>
+            <h3 class="map-popup__section-title">Critérios históricos atendidos</h3>
             ${buildCriteriaGroup("Colisões", collisionCriteria)}
             ${buildCriteriaGroup("Atropelamentos", pedestrianCriteria)}
         </div>
@@ -215,15 +207,17 @@ function buildCriteriaList(point) {
 
 
 function buildMarkerPopup(point, category, periodState = null) {
-    const hasPeriodFilter = periodState && (
-        periodState.years.length > 0 || periodState.months.length > 0
-    );
-    const periodSection = hasPeriodFilter ? `
+    const periodSection = periodState ? `
         <div class="map-popup__section">
-            <h3 class="map-popup__section-title">Ocorrências no período</h3>
-            <p class="mb-0">
-                <strong>${periodState.visibleCount}</strong>
-                ${periodState.label}
+            <h3 class="map-popup__section-title">Período visualizado</h3>
+            <p>${escapeHtml(periodState.label)}</p>
+            <h3 class="map-popup__section-title">Sinistros associados no período</h3>
+            <p class="mb-0"><strong>${periodState.visibleCount}</strong></p>
+            <p class="small text-secondary mb-0">
+                Esta contagem considera todos os tipos de sinistro associados ao local.
+            </p>
+            <p class="small text-secondary mb-0">
+                O período selecionado controla a exibição do local e não recalcula sua elegibilidade histórica.
             </p>
         </div>
     ` : "";
@@ -239,11 +233,11 @@ function buildMarkerPopup(point, category, periodState = null) {
             ${periodSection}
 
             <div class="map-popup__section">
-                <h3 class="map-popup__section-title">Ocorrências</h3>
+                <h3 class="map-popup__section-title">Máximos históricos em janelas de 1 e 3 anos</h3>
                 <table class="map-popup__stats">
                     <thead>
                         <tr>
-                            <th>Período</th>
+                            <th>Janela histórica</th>
                             <th>Colisões</th>
                             <th>Atropelamentos</th>
                         </tr>
@@ -261,6 +255,9 @@ function buildMarkerPopup(point, category, periodState = null) {
                         </tr>
                     </tbody>
                 </table>
+                <p class="small text-secondary mb-0">
+                    Os máximos de colisões e atropelamentos podem ocorrer em janelas históricas diferentes.
+                </p>
             </div>
         </article>
     `;
@@ -500,10 +497,24 @@ function createClusterMarkerRecord(point) {
         point.latitude,
         point.longitude
     ];
-    const marker = L.marker(coordinates, {icon: createMarkerIcon(category)});
-    marker.bindPopup(buildMarkerPopup(point, category), {maxWidth: 320});
+    const marker = L.circleMarker(coordinates, {
+        renderer: accidentRenderer,
+        radius: 7,
+        color: "#ffffff",
+        weight: 2,
+        opacity: 1,
+        fillColor: clusterCategoryColors[category],
+        fillOpacity: 0.9,
+        bubblingMouseEvents: false,
+    });
+    const record = {point, marker, periodState: null};
+    marker.bindPopup(
+        () => buildMarkerPopup(point, category, record.periodState),
+        // Preserve the former icon anchor (-10) plus popup offset (+7).
+        {maxWidth: 320, offset: [0, -3]}
+    );
 
-    return {point, marker};
+    return record;
 }
 
 
@@ -679,10 +690,37 @@ function countClusterAccidentsInPeriod(point, years, months) {
 
 
 function describeActivePeriod(years, months) {
+    const joinLabels = (values) => values.length < 2
+        ? values.join("")
+        : `${values.slice(0, -1).join(", ")} e ${values[values.length - 1]}`;
     if (years.length === 0 && months.length === 0) {
-        return "";
+        return "Todos os períodos disponíveis";
     }
-    return "sinistros no período selecionado";
+    if (months.length === 0) {
+        return `Todos os meses disponíveis de ${joinLabels(years)}`;
+    }
+
+    // Describe only existing year/month pairs; this does not change selection.
+    const periods = availablePeriods
+        .filter((period) => years.length === 0 || years.includes(period.year))
+        .map((period) => ({
+            year: period.year,
+            months: period.months.filter((month) => months.includes(month)),
+        }))
+        .filter((period) => period.months.length > 0);
+    if (periods.length === 0) {
+        return "Nenhum período disponível nesta seleção";
+    }
+    return periods.map((period) => {
+        const labels = period.months.map((month) => (
+            period.months.length > 4
+                ? monthLabels[month - 1].slice(0, 3)
+                : monthLabels[month - 1]
+        ));
+        return periods.length === 1
+            ? `${joinLabels(labels)} de ${period.year}`
+            : `${period.year}: ${labels.join(", ")}`;
+    }).join("; ");
 }
 
 
@@ -802,8 +840,11 @@ function applyMapFilters() {
             visibleCount += groupState.visibleCount;
         });
     } else {
-        markersLayer.clearLayers();
-        markerRecords.forEach(({point, marker}) => {
+        markerRecords.forEach((record) => {
+            const {point, marker} = record;
+            if (marker.isPopupOpen()) {
+                marker.closePopup();
+            }
             const visiblePeriodCount = countClusterAccidentsInPeriod(
                 point,
                 activePeriod.years,
@@ -820,20 +861,21 @@ function applyMapFilters() {
                 pointMatchesFilters(point, activeFilters)
                 && matchesPeriod
             );
-            marker.setPopupContent(buildMarkerPopup(
-                point,
-                getMarkerCategory(point),
-                {
-                    ...activePeriod,
-                    visibleCount: visiblePeriodCount,
-                    label: describeActivePeriod(
-                        activePeriod.years,
-                        activePeriod.months
-                    ),
-                }
-            ));
-            if (shouldBeVisible) {
+            record.periodState = {
+                ...activePeriod,
+                visibleCount: visiblePeriodCount,
+                label: describeActivePeriod(
+                    activePeriod.years,
+                    activePeriod.months
+                ),
+            };
+            const isVisible = markersLayer.hasLayer(marker);
+            if (shouldBeVisible && !isVisible) {
                 markersLayer.addLayer(marker);
+            } else if (!shouldBeVisible && isVisible) {
+                markersLayer.removeLayer(marker);
+            }
+            if (shouldBeVisible) {
                 visibleCount += 1;
             }
         });
