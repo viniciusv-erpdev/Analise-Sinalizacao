@@ -6,7 +6,12 @@ from django.http import FileResponse, HttpRequest, JsonResponse
 from django.shortcuts import get_object_or_404, render
 from django.templatetags.static import static
 from django.utils import timezone
-from django.views.decorators.http import require_POST
+from django.views.decorators.http import require_POST, require_http_methods
+
+from signaling.intersection_problems import serialize_problem_catalog
+from signaling.services import (
+    create_point_problem, serialize_point_problem, update_point_problem_solutions,
+)
 
 from signaling.forms import SignalingReportForm
 from signaling.overpass import (
@@ -18,6 +23,7 @@ from signaling.models import (
     MIN_SIGNALING_SEARCH_RADIUS_METERS,
     SignalingIntervention,
     SignalingPoint,
+    SignalingPointProblem,
 )
 from signaling.report_generator import (
     InvalidReportImage,
@@ -461,3 +467,69 @@ def update_intervention_notes(
     return JsonResponse(
         {"success": True, **_intervention_payload(intervention)}
     )
+
+
+@require_http_methods(["GET", "POST"])
+def point_problems(request: HttpRequest, point_id: int) -> JsonResponse:
+    try:
+        point = SignalingPoint.objects.get(pk=point_id)
+    except SignalingPoint.DoesNotExist:
+        return _api_not_found("Ponto de sinalização")
+    if request.method == "GET":
+        return JsonResponse({
+            "success": True,
+            "point_id": point.pk,
+            "catalog": serialize_problem_catalog(),
+            "problems": [
+                serialize_point_problem(problem) for problem in point.problems.prefetch_related("solutions")
+            ],
+        })
+    data = _read_json(request)
+    if data is None:
+        return JsonResponse({"success": False, "error": "JSON inválido."}, status=400)
+    try:
+        problem = create_point_problem(
+            point, data.get("problem_code"), data.get("solution_codes"),
+        )
+    except ValidationError as error:
+        return JsonResponse({"success": False, "errors": error.message_dict}, status=400)
+    return JsonResponse({"success": True, **serialize_point_problem(problem)}, status=201)
+
+
+@require_POST
+def update_problem_solution(
+    request: HttpRequest, point_id: int, problem_id: int,
+) -> JsonResponse:
+    try:
+        problem = SignalingPointProblem.objects.get(
+            pk=problem_id, signaling_point_id=point_id,
+        )
+    except SignalingPointProblem.DoesNotExist:
+        return _api_not_found("Problema do ponto")
+    data = _read_json(request)
+    if data is None:
+        return JsonResponse({"success": False, "error": "JSON inválido."}, status=400)
+    if set(data) != {"solution_codes"}:
+        return JsonResponse({
+            "success": False,
+            "error": "Informe somente solution_codes para alterar as soluções.",
+        }, status=400)
+    try:
+        problem = update_point_problem_solutions(problem, data["solution_codes"])
+    except ValidationError as error:
+        return JsonResponse({"success": False, "errors": error.message_dict}, status=400)
+    return JsonResponse({"success": True, **serialize_point_problem(problem)})
+
+
+@require_POST
+def delete_point_problem(
+    request: HttpRequest, point_id: int, problem_id: int,
+) -> JsonResponse:
+    try:
+        problem = SignalingPointProblem.objects.get(
+            pk=problem_id, signaling_point_id=point_id,
+        )
+    except SignalingPointProblem.DoesNotExist:
+        return _api_not_found("Problema do ponto")
+    problem.delete()
+    return JsonResponse({"success": True, "deleted": True, "id": problem_id})

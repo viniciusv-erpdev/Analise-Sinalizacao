@@ -6,6 +6,17 @@ from signaling import views
 app_name = "signaling"
 
 urlpatterns = [
+    path("points/<int:point_id>/problems/", views.point_problems, name="point-problems"),
+    path(
+        "points/<int:point_id>/problems/<int:problem_id>/solution/",
+        views.update_problem_solution,
+        name="update-problem-solution",
+    ),
+    path(
+        "points/<int:point_id>/problems/<int:problem_id>/delete/",
+        views.delete_point_problem,
+        name="delete-point-problem",
+    ),
     path(
         "points/<int:point_id>/pgts/",
         views.search_point_pgts,

@@ -26,6 +26,11 @@
         crossorigin="anonymous"
     >
 
+    <link 
+    rel="icon"
+    type="image/svg+xml"
+    href="{% static 'images/favicon.svg' %}">
+
     <style>
 
         :root {
@@ -528,6 +533,59 @@
             margin: 8px 0 0;
             padding: 6px 8px;
             font-size: 12px;
+        }
+
+        .intersection-problems {
+            max-height: min(600px, calc(100dvh - 160px));
+            overflow-y: auto;
+            overscroll-behavior: contain;
+        }
+
+        .intersection-problems__list {
+            max-height: 150px;
+            overscroll-behavior: contain;
+        }
+
+        .intersection-problems__choice {
+            display: block;
+            width: 100%;
+            margin: 3px 0;
+            padding: 7px;
+            border: 1px solid var(--bs-border-color);
+            border-radius: 6px;
+            background: var(--bs-body-bg);
+            color: inherit;
+            font: inherit;
+            text-align: left;
+            overflow-wrap: anywhere;
+        }
+
+        .intersection-problems__choice:hover:not(:disabled) {
+            background: var(--bs-tertiary-bg);
+        }
+
+        .intersection-problems__choice[aria-pressed="true"] {
+            background: rgba(var(--bs-primary-rgb), 0.10);
+            border-color: rgba(var(--bs-primary-rgb), 0.5);
+            box-shadow: 0 0 0 2px rgba(var(--bs-primary-rgb), 0.10);
+        }
+
+        .intersection-problems__choice:focus-visible {
+            outline: 2px solid var(--bs-primary);
+            outline-offset: 1px;
+        }
+
+        .intersection-problems__choice:disabled:not([aria-pressed="true"]) {
+            opacity: 0.65;
+        }
+
+        .intersection-problems__record {
+            padding: 7px 0;
+            overflow-wrap: anywhere;
+        }
+
+        .intersection-problems__record + .intersection-problems__record {
+            border-top: 1px solid var(--bs-border-color);
         }
 
         .signaling-notes-input {
@@ -1729,6 +1787,9 @@
     {{ signaling_map_data|json_script:"signaling-map-data" }}
     <div
         id="signaling-config"
+        data-problems-url-template="{% url 'signaling:point-problems' 0 %}"
+        data-problem-solution-url-template="{% url 'signaling:update-problem-solution' 0 0 %}"
+        data-problem-delete-url-template="{% url 'signaling:delete-point-problem' 0 0 %}"
         data-create-url="{% url 'signaling:create-point' %}"
         data-report-url-template="{% url 'signaling:point-report' 0 %}"
         data-delete-url-template="{% url 'signaling:delete-point' 0 %}"
@@ -1764,6 +1825,8 @@
     <script
         src="{% static 'js/map.js' %}">
     </script>
+
+    <script src="{% static 'js/intersection_problems.js' %}"></script>
 
     <script
         src="{% static 'js/signaling.js' %}">

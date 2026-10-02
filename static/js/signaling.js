@@ -158,7 +158,7 @@ function getCsrfToken() {
 
 
 async function postJson(url, body = {}) {
-    const response = await fetch(url, {
+    return requestSignalingJson(url, {
         method: "POST",
         headers: {
             "Content-Type": "application/json",
@@ -166,7 +166,11 @@ async function postJson(url, body = {}) {
         },
         body: JSON.stringify(body),
     });
+}
 
+
+async function requestSignalingJson(url, options = {}) {
+    const response = await fetch(url, options);
     const contentType = response.headers.get("Content-Type") || "";
     if (!contentType.toLowerCase().includes("application/json")) {
         const responseBody = await response.text();
@@ -181,7 +185,15 @@ async function postJson(url, body = {}) {
         );
     }
 
-    const data = await response.json();
+    let data;
+    try {
+        data = await response.json();
+    } catch {
+        throw new Error("O servidor retornou uma resposta inválida. Tente novamente.");
+    }
+    if (!data || typeof data !== "object") {
+        throw new Error("O servidor retornou uma resposta inválida. Tente novamente.");
+    }
     if (!response.ok) {
         const validationMessage = data.errors
             ? Object.entries(data.errors)
@@ -406,6 +418,7 @@ function buildExistingPointPopup(point) {
             </div>
             <h3 class="signaling-popup__heading">Intervenções</h3>
             ${buildInterventionList(point)}
+            <section data-point-problems></section>
             <section class="signaling-notes-panel" data-notes-panel hidden>
                 <header class="signaling-notes-panel__header">
                     <strong data-notes-panel-title>Observações</strong>
@@ -508,6 +521,9 @@ function buildExistingPointPopup(point) {
                     data-add-intervention
                 >
                     + Adicionar sinalização
+                </button>
+                <button class="btn btn-primary btn-sm" type="button" data-add-problems>
+                    + Adicionar problemas e soluções
                 </button>
             </div>
             <button
@@ -648,7 +664,10 @@ function buildInterventionForm(point) {
 
 
 function showPointPopup(marker, point) {
-    marker.setPopupContent(buildExistingPointPopup(point));
+    // Leaflet update() reparses string content; keep the live DOM and its handlers.
+    const content = document.createElement("div");
+    content.innerHTML = buildExistingPointPopup(point);
+    marker.setPopupContent(content);
     const popupElement = marker.getPopup().getElement();
     L.DomEvent.disableClickPropagation(popupElement);
     L.DomEvent.disableScrollPropagation(popupElement);
@@ -719,6 +738,27 @@ function showPointPopup(marker, point) {
             }
         });
     });
+
+    const problemOptions = {
+        marker, point, document, leaflet: L,
+        urls: {
+            collection: signalingConfig.dataset.problemsUrlTemplate,
+            solution: signalingConfig.dataset.problemSolutionUrlTemplate,
+            delete: signalingConfig.dataset.problemDeleteUrlTemplate,
+        },
+        getJson: requestSignalingJson,
+        postJson,
+        onBack: () => showPointPopup(marker, point),
+        confirm: (message) => window.confirm(message),
+    };
+    IntersectionProblems.open({
+        ...problemOptions, container: popupElement.querySelector("[data-point-problems]"),
+    });
+    popupElement.querySelector("[data-add-problems]")
+        .addEventListener("click", (event) => {
+            L.DomEvent.stopPropagation(event);
+            IntersectionProblems.open(problemOptions);
+        });
 
     popupElement.querySelector("[data-add-intervention]")
         .addEventListener("click", (event) => {

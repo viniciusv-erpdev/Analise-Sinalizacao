@@ -1,6 +1,8 @@
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 
+from signaling.intersection_problems import problem_solution_codes, validate_problem_solution
+
 
 DEFAULT_SIGNALING_SEARCH_RADIUS_METERS = 50
 MIN_SIGNALING_SEARCH_RADIUS_METERS = 10
@@ -85,3 +87,68 @@ class SignalingIntervention(models.Model):
 
     def __str__(self) -> str:
         return f"{self.get_type_display()} - {self.get_condition_display()}"
+
+
+class SignalingPointProblem(models.Model):
+    signaling_point = models.ForeignKey(
+        SignalingPoint, on_delete=models.CASCADE, related_name="problems",
+    )
+    problem_code = models.CharField(
+        max_length=2,
+        choices=[(code, code) for code, _ in problem_solution_codes()],
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["problem_code"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["signaling_point", "problem_code"],
+                name="unique_problem_per_signaling_point",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(problem_code__in=[code for code, _ in problem_solution_codes()]),
+                name="valid_signaling_problem_code",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"Ponto {self.signaling_point_id}: {self.problem_code}"
+
+
+class SignalingPointProblemSolution(models.Model):
+    problem = models.ForeignKey(
+        SignalingPointProblem, on_delete=models.CASCADE, related_name="solutions",
+    )
+    solution_code = models.CharField(
+        max_length=3,
+        choices=[
+            (solution, solution)
+            for _, solutions in problem_solution_codes()
+            for solution in solutions
+        ],
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["solution_code"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["problem", "solution_code"], name="unique_solution_per_point_problem",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(solution_code__in=[
+                    solution for _, solutions in problem_solution_codes() for solution in solutions
+                ]),
+                name="valid_point_problem_solution_code",
+            ),
+        ]
+
+    def clean(self):
+        super().clean()
+        if self.problem_id:
+            validate_problem_solution(self.problem.problem_code, self.solution_code)
+
+    def __str__(self) -> str:
+        return f"{self.problem_id}: {self.solution_code}"
