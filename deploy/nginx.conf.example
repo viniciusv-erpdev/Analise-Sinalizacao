@@ -1,0 +1,30 @@
+# Template HTTP Ubuntu, incluido no contexto http do Nginx.
+# Substitua todos os placeholders antes de validar/instalar.
+server {
+    listen 80;
+    server_name <SERVER_NAME>;
+
+    # Defina um limite nao nulo com unidade Nginx (ex.: sufixo m).
+    client_max_body_size <MAX_UPLOAD_SIZE>;
+
+    # Nao disponibilizar arquivos/diretorios ocultos, inclusive em staticfiles.
+    location ~ /\. {
+        deny all;
+    }
+
+    location /static/ {
+        # Caminho absoluto de staticfiles, sem barra final no placeholder.
+        alias <STATIC_ROOT>/;
+        autoindex off;
+    }
+
+    location / {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_set_header Host $http_host;
+        proxy_set_header X-Real-IP $remote_addr;
+        # Um unico proxy: substituir qualquer cadeia enviada pelo cliente.
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        # Timeouts permanecem nos padroes; medir junto ao timeout do Gunicorn.
+    }
+}

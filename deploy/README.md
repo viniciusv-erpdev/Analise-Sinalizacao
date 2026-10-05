@@ -44,4 +44,27 @@ sudo journalctl -u gunicorn.service -n 100 --no-pager
 
 **Esses comandos não foram executados**: esta etapa foi preparada no Windows, fora do servidor Linux definitivo. O nome `gunicorn.service` acima é o nome proposto para instalação do template; ajuste os comandos se escolher outro nome.
 
-Nginx, arquivos estáticos em produção, HTTPS, preparação do servidor e ajustes baseados em medições ficam para etapas posteriores. O template não serve arquivos estáticos por si só.
+HTTPS, preparação do servidor e ajustes baseados em medições ficam para etapas posteriores. O template systemd não serve arquivos estáticos por si só.
+
+## Template HTTP do Nginx
+
+`nginx.conf.example` prepara a camada Nginx -> Gunicorn: usuários acessam o Nginx, que encaminha requisições dinâmicas para `http://127.0.0.1:8000`. Gunicorn mantém o bind interno; **a porta 8000 não deve ser liberada externamente**. `listen 80;` representa apenas o estágio HTTP inicial, sem decidir a exposição final dessa porta pela TI.
+
+Substitua `<SERVER_NAME>` pelo host real, também autorizado em `DJANGO_ALLOWED_HOSTS`; `<STATIC_ROOT>` pelo caminho absoluto de `staticfiles` (sem barra final); e `<MAX_UPLOAD_SIZE>` por um limite não nulo, com unidade aceita pelo Nginx, definido após validar os tamanhos de CSV/imagens e os requisitos da TI. Não há limite definitivo escolhido; os placeholders precisam ser substituídos antes da validação no servidor.
+
+Execute futuramente `python manage.py collectstatic --noinput` antes de disponibilizar `/static/`. Nginx servirá esses arquivos diretamente de `STATIC_ROOT`, nunca da pasta source `static/`. Seu usuário precisará de leitura dos arquivos e travessia dos diretórios pais. Não há alias para a raiz do projeto, listagem de diretórios ou acesso a arquivos ocultos. Código-fonte, SQLite e segredos não são publicados pelo Nginx.
+
+O proxy preserva `Host` e informa `X-Real-IP`, `X-Forwarded-For` e `X-Forwarded-Proto`. Para o único proxy previsto, `X-Forwarded-For` é substituído pelo IP da conexão recebida, sem confiar em valores enviados pelo cliente. Uma futura camada de proxy adicional exigirá revisão dessa política.
+
+Não foi configurado `/media/`: os settings não definem `MEDIA_ROOT`/`MEDIA_URL` e, conforme o contexto desta etapa, uploads não dependem desse armazenamento persistente. HTTPS/certificados e configurações Django de confiança em HTTPS por proxy, redirecionamento, cookies seguros e HSTS permanecem para outra etapa.
+
+O template não redefine timeouts de proxy; mantém os padrões do Nginx (conexão, envio e leitura: 60 segundos, sujeitos à configuração global do servidor). Esses limites não representam um prazo total da operação. Proxy timeouts, timeout do worker Gunicorn e duração real de processamento deverão ser medidos em conjunto, sem aumentar valores arbitrariamente.
+
+No Ubuntu, a instalação futura será como um site no contexto `http`, tipicamente em `/etc/nginx/sites-available/<nome>`, com link em `sites-enabled`. Nome, caminhos e conflitos com sites existentes serão confirmados no servidor. Após substituir os placeholders e preparar o ambiente, os comandos previstos são:
+
+```sh
+sudo nginx -t
+sudo systemctl reload nginx
+```
+
+**Não foram executados**: a preparação ocorreu no Windows, sem instalação, execução ou simulação do Nginx.
