@@ -342,6 +342,27 @@
 
                 <section class="card shadow-sm mb-3">
                     <div class="card-body">
+                        <h2 class="h5 card-title">PROBLEMAS E SOLUÇÕES</h2>
+                        <div class="d-grid gap-2">
+                            {% for problem in survey.problems %}
+                                <article class="border rounded p-3">
+                                    <strong>{{ problem.problem_text }}</strong>
+                                    <p class="mb-1 mt-2">Soluções:</p>
+                                    <ul class="mb-0">
+                                        {% for solution in problem.solutions %}
+                                            <li>{{ solution.text }}</li>
+                                        {% endfor %}
+                                    </ul>
+                                </article>
+                            {% empty %}
+                                <p class="text-secondary mb-0">Nenhum problema ou solução cadastrado.</p>
+                            {% endfor %}
+                        </div>
+                    </div>
+                </section>
+
+                <section class="card shadow-sm mb-3">
+                    <div class="card-body">
                         <label class="h5 card-title d-block" for="{{ form.photos.id_for_label }}">
                             {{ form.photos.label }}
                         </label>

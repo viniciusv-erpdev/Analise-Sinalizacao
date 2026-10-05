@@ -8,6 +8,11 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 from django.urls import reverse
 from PIL import Image
+from docx import Document
+
+from signaling.services import create_point_problem
+from signaling.intersection_problems import get_problem
+from signaling.report_generator import generate_signaling_report
 
 from signaling.models import SignalingIntervention, SignalingPoint
 from signaling.surveys import ANALYSIS_SESSION_KEY
@@ -92,6 +97,82 @@ class SignalingReportDownloadTests(TestCase):
             "street": "RUA TESTE",
             "modes": [{"name": "Automóvel", "quantity": 1}],
         }
+
+    def test_report_without_persisted_problems(self):
+        self.set_individual_analysis()
+        response = self.client.get(self.url)
+        self.assertContains(response, "PROBLEMAS E SOLUÇÕES")
+        self.assertContains(response, "Nenhum problema ou solução cadastrado.")
+        docx_response = self.client.post(self.url, self.valid_form_data())
+        self.assertEqual(docx_response.status_code, 200)
+        document = Document(BytesIO(self.response_bytes(docx_response)))
+        self.assertIn("Nenhum problema ou solução cadastrado.",
+                      [p.text for p in document.paragraphs])
+
+    def test_html_groups_persisted_problems_and_solutions_in_catalog_order(self):
+        self.set_individual_analysis()
+        for entries in [
+            [("P1", ["P1A"])],
+            [("P1", ["P1B", "P1A"])],
+            [("P3", ["P3C"]), ("P1", ["P1B", "P1A"])],
+        ]:
+            with self.subTest(entries=entries):
+                self.point.problems.all().delete()
+                for code, solutions in entries:
+                    create_point_problem(self.point, code, solutions)
+                response = self.client.get(self.url)
+                self.assertEqual(response.status_code, 200)
+                html = response.content.decode()
+                previous = -1
+                for code, solutions in sorted(entries):
+                    definition = get_problem(code)
+                    self.assertContains(response, definition.text, count=1)
+                    position = html.index(definition.text)
+                    self.assertGreater(position, previous)
+                    previous = position
+                    for solution, text in definition.solutions:
+                        if solution in solutions:
+                            self.assertContains(response, text, count=1)
+                            self.assertGreater(html.index(text), previous)
+                            previous = html.index(text)
+
+    def test_word_uses_same_persisted_problems_as_html_and_preserves_interventions(self):
+        self.set_individual_analysis()
+        create_point_problem(self.point, "P3", ["P3C"])
+        create_point_problem(self.point, "P1", ["P1B", "P1A"])
+        SignalingIntervention.objects.create(
+            signaling_point=self.point, type="TRAFFIC_LIGHT",
+            condition="OK", notes="Intervenção preservada",
+        )
+        # Another waypoint must never leak into this report.
+        other = SignalingPoint.objects.create(latitude=1, longitude=1, status="OK")
+        create_point_problem(other, "P2", ["P2A"])
+        html = self.client.get(self.url)
+        self.assertContains(html, "Intervenção preservada")
+        self.assertNotContains(html, get_problem("P2").text)
+        with patch("signaling.views.generate_signaling_report", wraps=generate_signaling_report) as generator:
+            response = self.client.post(self.url, self.valid_form_data())
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(generator.call_args.args[1]["problems"], html.context["survey"]["problems"])
+        document = Document(BytesIO(self.response_bytes(response)))
+        paragraphs = [p.text for p in document.paragraphs]
+        section = paragraphs.index("PROBLEMAS E SOLUÇÕES")
+        self.assertGreater(section, paragraphs.index("Intervenções"))
+        self.assertLess(section, paragraphs.index("Fotos do local"))
+        previous = section
+        for problem in html.context["survey"]["problems"]:
+            self.assertEqual(paragraphs.count(problem["problem_text"]), 1)
+            self.assertGreater(paragraphs.index(problem["problem_text"]), previous)
+            previous = paragraphs.index(problem["problem_text"])
+            for solution in problem["solutions"]:
+                self.assertEqual(paragraphs.count(solution["text"]), 1)
+                self.assertGreater(paragraphs.index(solution["text"]), previous)
+                previous = paragraphs.index(solution["text"])
+        cells = [cell.text for table in document.tables for row in table.rows for cell in row.cells]
+        self.assertIn("Intervenção preservada", cells)
+        self.assertNotIn(get_problem("P2").text, paragraphs)
+        self.assertLess(html.content.decode().index(">Intervenções<"),
+                        html.content.decode().index(">PROBLEMAS E SOLUÇÕES<"))
 
     def test_get_displays_form_and_automatic_survey_data(self):
         self.set_individual_analysis()

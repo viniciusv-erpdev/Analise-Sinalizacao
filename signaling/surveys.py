@@ -6,6 +6,7 @@ from analysis.map_data import (
 )
 from analysis.spatial import haversine_distance_meters
 from signaling.models import SignalingIntervention, SignalingPoint
+from signaling.services import serialize_point_problem
 
 
 ANALYSIS_SESSION_KEY = "accident_analysis_state"
@@ -97,5 +98,9 @@ def build_signaling_survey_from_items(
             "by_type": accidents_by_type,
         },
         "interventions": interventions,
+        "problems": [
+            serialize_point_problem(problem)
+            for problem in signaling_point.problems.prefetch_related("solutions")
+        ],
         "accidents": nearby_accidents,
     }

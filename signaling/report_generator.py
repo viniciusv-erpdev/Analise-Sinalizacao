@@ -207,6 +207,17 @@ def generate_signaling_report(
     else:
         document.add_paragraph("Nenhuma intervenção cadastrada.")
 
+    document.add_heading("PROBLEMAS E SOLUÇÕES", level=1)
+    problems = survey.get("problems", [])
+    if problems:
+        for problem in problems:
+            document.add_paragraph().add_run(problem["problem_text"]).bold = True
+            document.add_paragraph("Soluções:")
+            for solution in problem["solutions"]:
+                document.add_paragraph(solution["text"], style="List Bullet")
+    else:
+        document.add_paragraph("Nenhum problema ou solução cadastrado.")
+
     document.add_heading("Fotos do local", level=1)
     photo_buffers = [_validated_photo_buffer(photo) for photo in photos]
     if photo_buffers:
