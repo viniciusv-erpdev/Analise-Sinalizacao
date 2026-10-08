@@ -1,0 +1,388 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Relatório do local</title>
+    <link
+        rel="stylesheet"
+        href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css"
+        integrity="sha384-sRIl4kxILFvY47J16cr9ZwB07vP4J8+LH7qKQnuqkuIAvNWLzeN8tE5YBujZqJLB"
+        crossorigin="anonymous"
+    >
+    <style>
+        .report-container { max-width: 960px; }
+        .report-note { white-space: pre-wrap; overflow-wrap: anywhere; }
+        .report-accidents { max-height: 430px; overflow-y: auto; }
+        .report-chart { display: block; width: 100%; max-width: 760px; height: auto; margin: 0 auto; }
+        .report-intervention {
+            display: grid;
+            grid-template-columns: 36px minmax(110px, 0.8fr) minmax(180px, 2fr) auto;
+            gap: 12px;
+            align-items: center;
+            padding: 8px 10px;
+        }
+        .report-intervention-icon-slot {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .report-intervention-icon { width: 32px; height: 32px; object-fit: contain; }
+        .report-intervention-name,
+        .report-intervention-note {
+            min-width: 0;
+            overflow-wrap: anywhere;
+        }
+        .report-intervention-note {
+            margin: 0;
+            line-height: 1.35;
+        }
+        .report-intervention-status {
+            display: inline-flex;
+            gap: 6px;
+            align-items: center;
+            justify-self: end;
+            white-space: nowrap;
+        }
+        .report-intervention-status-icon {
+            width: 18px;
+            height: 18px;
+            object-fit: contain;
+        }
+        @media (max-width: 767.98px) {
+            .report-intervention {
+                grid-template-columns: 32px minmax(0, 1fr) auto;
+                gap: 6px 10px;
+            }
+            .report-intervention-icon-slot {
+                grid-row: 1 / span 2;
+                align-self: start;
+            }
+            .report-intervention-note {
+                grid-column: 2 / 4;
+            }
+            .report-intervention-status {
+                grid-column: 3;
+            }
+        }
+    </style>
+</head>
+<body class="bg-light">
+    <main class="container report-container py-4">
+        <a
+            class="btn btn-outline-secondary btn-sm mb-3"
+            href="{% url 'analysis' %}"
+        >← Voltar ao mapa</a>
+
+        <h1 class="h3 mb-4">Relatório do local</h1>
+
+        {% if filter_error %}
+            <div class="alert alert-danger" role="alert">
+                <h2 class="h5">Não foi possível aplicar os filtros do relatório.</h2>
+                <p class="mb-0">{{ filter_error }}</p>
+            </div>
+        {% elif not survey %}
+            <div class="alert alert-info" role="status">
+                <h2 class="h5">Não há uma análise de sinistros individuais disponível.</h2>
+                <p class="mb-0">
+                    Carregue os arquivos no modo Todos os sinistros e tente novamente.
+                </p>
+            </div>
+        {% else %}
+            <form method="post" enctype="multipart/form-data" novalidate>
+                {% csrf_token %}
+                {% if form.non_field_errors %}
+                    <div class="alert alert-danger" role="alert">
+                        {{ form.non_field_errors }}
+                    </div>
+                {% endif %}
+
+                <section class="card shadow-sm mb-3">
+                    <div class="card-body">
+                        <h2 class="h5 card-title">Informações do estudo</h2>
+                        <div class="row g-3">
+                            <div class="col-12">
+                                <label class="form-label" for="{{ form.inspection_address.id_for_label }}">
+                                    {{ form.inspection_address.label }}
+                                </label>
+                                {{ form.inspection_address }}
+                                {% for error in form.inspection_address.errors %}
+                                    <div class="invalid-feedback d-block">{{ error }}</div>
+                                {% endfor %}
+                            </div>
+                            <div class="col-md-4">
+                                <span class="form-label d-block">Data de geração do relatório</span>
+                                <span class="form-control bg-light">{{ generated_on|date:"d/m/Y" }}</span>
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label" for="{{ form.occurrence_date.id_for_label }}">
+                                    {{ form.occurrence_date.label }}
+                                </label>
+                                {{ form.occurrence_date }}
+                                {% for error in form.occurrence_date.errors %}
+                                    <div class="invalid-feedback d-block">{{ error }}</div>
+                                {% endfor %}
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label" for="{{ form.inspection_date.id_for_label }}">
+                                    {{ form.inspection_date.label }}
+                                </label>
+                                {{ form.inspection_date }}
+                                {% for error in form.inspection_date.errors %}
+                                    <div class="invalid-feedback d-block">{{ error }}</div>
+                                {% endfor %}
+                            </div>
+                            <div class="col-12">
+                                <label class="form-label" for="{{ form.study_reason.id_for_label }}">
+                                    {{ form.study_reason.label }}
+                                </label>
+                                {{ form.study_reason }}
+                                {% for error in form.study_reason.errors %}
+                                    <div class="invalid-feedback d-block">{{ error }}</div>
+                                {% endfor %}
+                            </div>
+                            <div class="col-12">
+                                <label class="form-label" for="{{ form.inspector_name.id_for_label }}">
+                                    {{ form.inspector_name.label }}
+                                </label>
+                                {{ form.inspector_name }}
+                                {% for error in form.inspector_name.errors %}
+                                    <div class="invalid-feedback d-block">{{ error }}</div>
+                                {% endfor %}
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="card shadow-sm mb-3" data-characterization
+                         data-pgt-search-url="{% url 'signaling:search-point-pgts' point.id %}">
+                    <div class="card-body">
+                        <h2 class="h5 card-title">Caracterização do local</h2>
+                        <div class="row g-3">
+                            {% for field in form.characterization_fields %}
+                                <div class="col-12">
+                                    <label class="form-label" for="{{ field.id_for_label }}">{{ field.label }}</label>
+                                    {{ field }}
+                                    {% for error in field.errors %}
+                                        <div class="invalid-feedback d-block">{{ error }}</div>
+                                    {% endfor %}
+                                </div>
+                            {% endfor %}
+                            <div class="col-12">
+                                <h3 class="h6">{{ form.pgts.label }}</h3>
+                                <p class="form-text">
+                                    Sugestões do OpenStreetMap no raio atual do ponto ({{ point.search_radius_meters }} m).
+                                    Os dados podem estar incompletos. Revise, edite ou remova os locais encontrados.
+                                    <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">© OpenStreetMap contributors</a>
+                                </p>
+                                <button class="btn btn-outline-primary btn-sm mb-3" type="button" data-pgt-search>
+                                    Buscar locais automaticamente
+                                </button>
+                                {{ form.pgts }}
+                                {% for error in form.pgts.errors %}
+                                    <div class="invalid-feedback d-block">{{ error }}</div>
+                                {% endfor %}
+                                <div data-pgt-notice role="status" aria-live="polite" hidden></div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="card shadow-sm mb-3">
+                    <div class="card-body">
+                        <h2 class="h5 card-title">Filtros aplicados</h2>
+                        <dl class="row mb-0">
+                            <dt class="col-sm-4">Período</dt>
+                            <dd class="col-sm-8">{{ survey.filters.period }}</dd>
+                            <dt class="col-sm-4">Categorias</dt>
+                            <dd class="col-sm-8">{{ survey.filters.categories }}</dd>
+                            <dt class="col-sm-4">Gravidade</dt>
+                            <dd class="col-sm-8">{{ survey.filters.gravity }}</dd>
+                            <dt class="col-sm-4">Raio</dt>
+                            <dd class="col-sm-8">{{ survey.radius_meters }} m</dd>
+                        </dl>
+                    </div>
+                </section>
+
+                <section class="card shadow-sm mb-3">
+                    <div class="card-body">
+                        <h2 class="h5 card-title">Objetivo</h2>
+                        <label class="form-label" for="{{ form.study_objective.id_for_label }}">
+                            {{ form.study_objective.label }}
+                        </label>
+                        {{ form.study_objective }}
+                        {% for error in form.study_objective.errors %}
+                            <div class="invalid-feedback d-block">{{ error }}</div>
+                        {% endfor %}
+                    </div>
+                </section>
+
+            <section class="card shadow-sm mb-3">
+                <div class="card-body">
+                    <h2 class="h5 card-title">Resumo</h2>
+                    <dl class="row mb-0">
+                        <dt class="col-sm-7">Raio analisado</dt>
+                        <dd class="col-sm-5">{{ survey.radius_meters }} m</dd>
+                        <dt class="col-sm-7">Status da sinalização</dt>
+                        <dd class="col-sm-5">{{ survey.status.label }}</dd>
+                        <dt class="col-sm-7">Total de sinistros</dt>
+                        <dd class="col-sm-5">{{ survey.total_accidents }}</dd>
+                        <dt class="col-sm-7">Fatais</dt>
+                        <dd class="col-sm-5">{{ survey.summary.fatal }}</dd>
+                        <dt class="col-sm-7">Não fatais</dt>
+                        <dd class="col-sm-5">{{ survey.summary.non_fatal }}</dd>
+                    </dl>
+                </div>
+            </section>
+
+            <section class="card shadow-sm mb-3">
+                <div class="card-body">
+                    <h2 class="h5 card-title">Tipos de sinistro</h2>
+                    <img
+                        class="report-chart"
+                        src="{{ chart_data_uri }}"
+                        alt="Gráfico de colunas dos tipos de sinistro"
+                    >
+                    <ul class="list-group list-group-flush">
+                        {% for label, quantity in survey.summary.by_type.items %}
+                            <li class="list-group-item d-flex justify-content-between px-0">
+                                <span>{{ label }}</span>
+                                <strong>{{ quantity }}</strong>
+                            </li>
+                        {% endfor %}
+                    </ul>
+                </div>
+            </section>
+
+            <section class="card shadow-sm mb-3">
+                <div class="card-body">
+                    <h2 class="h5 card-title">Sinistros relacionados</h2>
+                    {% if survey.accidents %}
+                        <div class="table-responsive report-accidents">
+                            <table class="table table-sm table-striped align-middle mb-0">
+                                <thead class="position-sticky top-0 table-light">
+                                    <tr>
+                                        <th>ID</th><th>Data</th><th>Tipo</th><th>Gravidade</th>
+                                        <th>Local</th><th>Distância</th><th>Modais</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for accident in survey.accidents %}
+                                        <tr>
+                                            <td>{{ accident.id }}</td>
+                                            <td>{{ accident.date }}</td>
+                                            <td>{{ accident.accident_type }}</td>
+                                            <td>{{ accident.record_type }}</td>
+                                            <td>{{ accident.street }}</td>
+                                            <td>{{ accident.distance_meters|floatformat:1 }} m</td>
+                                            <td>
+                                                {% for mode in accident.modes %}
+                                                    <span class="d-block">{{ mode.name }}: {{ mode.quantity }}</span>
+                                                {% empty %}
+                                                    <span class="text-secondary">Não disponível</span>
+                                                {% endfor %}
+                                            </td>
+                                        </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    {% else %}
+                        <p class="text-secondary mb-0">
+                            Nenhum sinistro encontrado em um raio de {{ survey.radius_meters }} m.
+                        </p>
+                    {% endif %}
+                </div>
+            </section>
+
+                <section class="card shadow-sm mb-3">
+                    <div class="card-body">
+                        <h2 class="h5 card-title">Intervenções</h2>
+                        <div class="d-grid gap-2">
+                            {% for intervention in survey.interventions %}
+                                <article class="report-intervention border rounded">
+                                    <div class="report-intervention-icon-slot">
+                                        {% if intervention.icon_url %}
+                                            <img
+                                                class="report-intervention-icon"
+                                                src="{{ intervention.icon_url }}"
+                                                alt=""
+                                            >
+                                        {% endif %}
+                                    </div>
+                                    <strong class="report-intervention-name">{{ intervention.type_label }}</strong>
+                                    <p class="report-intervention-note report-note small text-secondary">
+                                        <strong>Observações:</strong>
+                                        {% if intervention.notes %}{{ intervention.notes }}{% else %}Não informado{% endif %}
+                                    </p>
+                                    <span class="report-intervention-status small">
+                                        <strong>{{ intervention.condition_label }}</strong>
+                                        {% if intervention.condition == 'OK' %}
+                                            <img
+                                                class="report-intervention-status-icon"
+                                                src="{% static 'icons/signaling/ok-signaling-report.svg' %}"
+                                                alt="Condição adequada"
+                                            >
+                                        {% elif intervention.condition == 'ABSENT' %}
+                                            <img
+                                                class="report-intervention-status-icon"
+                                                src="{% static 'icons/signaling/wrong-signaling-report.svg' %}"
+                                                alt="Condição inadequada"
+                                            >
+                                        {% endif %}
+                                    </span>
+                                </article>
+                            {% empty %}
+                                <p class="text-secondary mb-0">Nenhuma intervenção cadastrada.</p>
+                            {% endfor %}
+                        </div>
+                    </div>
+                </section>
+
+                <section class="card shadow-sm mb-3">
+                    <div class="card-body">
+                        <h2 class="h5 card-title">PROBLEMAS E SOLUÇÕES</h2>
+                        <div class="d-grid gap-2">
+                            {% for problem in survey.problems %}
+                                <article class="border rounded p-3">
+                                    <strong>{{ problem.problem_text }}</strong>
+                                    <p class="mb-1 mt-2">Soluções:</p>
+                                    <ul class="mb-0">
+                                        {% for solution in problem.solutions %}
+                                            <li>{{ solution.text }}</li>
+                                        {% endfor %}
+                                    </ul>
+                                </article>
+                            {% empty %}
+                                <p class="text-secondary mb-0">Nenhum problema ou solução cadastrado.</p>
+                            {% endfor %}
+                        </div>
+                    </div>
+                </section>
+
+                <section class="card shadow-sm mb-3">
+                    <div class="card-body">
+                        <label class="h5 card-title d-block" for="{{ form.photos.id_for_label }}">
+                            {{ form.photos.label }}
+                        </label>
+                        {{ form.photos }}
+                        <div class="form-text">
+                            Até 10 imagens JPEG ou PNG, com no máximo 10 MB cada.
+                            Em caso de erro, selecione os arquivos novamente.
+                        </div>
+                        {% for error in form.photos.errors %}
+                            <div class="invalid-feedback d-block">{{ error }}</div>
+                        {% endfor %}
+                    </div>
+                </section>
+
+                <button class="btn btn-primary" type="submit">
+                    Gerar relatório Word
+                </button>
+            </form>
+        {% endif %}
+    </main>
+    <script src="{% static 'js/report_characterization.js' %}" defer></script>
+</body>
+</html>

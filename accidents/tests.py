@@ -1,3 +1,1241 @@
-from django.test import TestCase
+from io import BytesIO
+from unittest.mock import patch
 
-# Create your tests here.
+import pandas as pd
+from accidents.normalizer import normalize
+from django.core.files.uploadedfile import SimpleUploadedFile
+from django.test import SimpleTestCase, TestCase
+from django.urls import reverse
+
+from accidents.services import (
+    AccidentImportError,
+    EXCLUSIVELY_UNINJURED_EXCLUDED_COUNT_ATTR,
+    exclude_exclusively_uninjured_accidents,
+    import_accident_files,
+)
+from analysis.criteria import (
+    evaluate_criteria,
+    evaluate_historical_criteria,
+)
+from analysis.map_data import build_individual_map_data, build_map_data
+from analysis.pipeline import (
+    process_individual_accidents,
+    process_accidents,
+)
+from analysis.periods import (
+    build_cluster_period_summaries,
+    extract_available_periods,
+)
+from signaling.surveys import ANALYSIS_SESSION_KEY
+
+
+SOURCE_COLUMNS = [
+    "id_sinistro",
+    "data_sinistro",
+    "latitude",
+    "longitude",
+    "tp_sinistro_primario",
+    "logradouro",
+    "numero_logradouro",
+    "municipio",
+]
+
+
+SEVERITY_SOURCE_COLUMNS = [
+    "qtd_gravidade_fatal",
+    "qtd_gravidade_grave",
+    "qtd_gravidade_leve",
+    "qtd_gravidade_nao_disponivel",
+    "qtd_gravidade_ileso",
+]
+
+
+INDIVIDUAL_COLUMNS = [
+    "id",
+    "record_type",
+    "date",
+    "latitude",
+    "longitude",
+    "accident_type",
+    "street",
+    "pedestrian_count",
+    "bicycle_count",
+    "motorcycle_count",
+    "car_count",
+    "bus_count",
+    "truck_count",
+    "other_vehicle_count",
+    "unavailable_vehicle_count",
+]
+
+
+def make_csv(
+    rows: list[list[object]],
+    encoding: str = "utf-8",
+) -> bytes:
+    header = ";".join([*SOURCE_COLUMNS, *SEVERITY_SOURCE_COLUMNS])
+    lines = [
+        ";".join(str(value) for value in row)
+        for row in rows
+    ]
+    return "\n".join([header, *lines]).encode(encoding)
+
+
+def make_upload(
+    name: str,
+    rows: list[list[object]],
+    encoding: str = "utf-8",
+) -> SimpleUploadedFile:
+    return SimpleUploadedFile(
+        name,
+        make_csv(rows, encoding),
+        content_type="text/csv",
+    )
+
+
+class AccidentImportTests(SimpleTestCase):
+    def severity_frame(self, rows):
+        return pd.DataFrame(rows, columns=[
+            "qtd_gravidade_fatal",
+            "qtd_gravidade_grave",
+            "qtd_gravidade_leve",
+            "qtd_gravidade_nao_disponivel",
+            "qtd_gravidade_ileso",
+        ])
+
+    def test_excludes_only_rows_with_exclusively_uninjured_presence(self):
+        accidents = self.severity_frame([
+            [pd.NA, pd.NA, pd.NA, pd.NA, 2],
+            [1, pd.NA, pd.NA, pd.NA, 2],
+            [pd.NA, 1, pd.NA, pd.NA, 1],
+            [pd.NA, pd.NA, 1, pd.NA, 1],
+            [pd.NA, pd.NA, pd.NA, 1, 1],
+            [pd.NA, pd.NA, pd.NA, pd.NA, pd.NA],
+        ])
+
+        result = exclude_exclusively_uninjured_accidents(accidents)
+
+        self.assertEqual(result.index.tolist(), [0, 1, 2, 3, 4])
+        self.assertEqual(len(result), 5)
+        self.assertEqual(
+            result.attrs[EXCLUSIVELY_UNINJURED_EXCLUDED_COUNT_ATTR],
+            1,
+        )
+
+    def test_zero_in_other_severity_columns_is_not_null(self):
+        accidents = self.severity_frame([
+            [0, pd.NA, pd.NA, pd.NA, 2],
+            [pd.NA, 0, pd.NA, pd.NA, 2],
+            [pd.NA, pd.NA, 0, pd.NA, 2],
+            [pd.NA, pd.NA, pd.NA, 0, 2],
+        ])
+
+        result = exclude_exclusively_uninjured_accidents(accidents)
+
+        self.assertEqual(len(result), 4)
+        self.assertEqual(
+            result.attrs[EXCLUSIVELY_UNINJURED_EXCLUDED_COUNT_ATTR],
+            0,
+        )
+
+    def test_zero_in_uninjured_column_is_present_and_is_excluded(self):
+        accidents = self.severity_frame([
+            [pd.NA, pd.NA, pd.NA, pd.NA, 0],
+        ])
+
+        result = exclude_exclusively_uninjured_accidents(accidents)
+
+        self.assertTrue(result.empty)
+        self.assertEqual(
+            result.attrs[EXCLUSIVELY_UNINJURED_EXCLUDED_COUNT_ATTR],
+            1,
+        )
+
+    def test_empty_and_whitespace_strings_follow_pandas_null_semantics(self):
+        content = (
+            "qtd_gravidade_fatal;qtd_gravidade_grave;"
+            "qtd_gravidade_leve;qtd_gravidade_nao_disponivel;"
+            "qtd_gravidade_ileso\n;;;;\n;;;;   "
+        )
+        parsed = pd.read_csv(BytesIO(content.encode("utf-8")), sep=";")
+
+        self.assertTrue(pd.isna(parsed.loc[0, "qtd_gravidade_ileso"]))
+        self.assertEqual(parsed.loc[1, "qtd_gravidade_ileso"], "   ")
+        result = exclude_exclusively_uninjured_accidents(parsed)
+        self.assertEqual(len(result), 1)
+        self.assertTrue(pd.isna(result.iloc[0]["qtd_gravidade_ileso"]))
+
+    def test_empty_dataframe_is_supported(self):
+        result = exclude_exclusively_uninjured_accidents(
+            self.severity_frame([])
+        )
+
+        self.assertTrue(result.empty)
+        self.assertEqual(
+            result.attrs[EXCLUSIVELY_UNINJURED_EXCLUDED_COUNT_ATTR],
+            0,
+        )
+
+    def test_reads_valid_utf8_csv(self):
+        uploaded_file = make_upload(
+            "utf8.csv",
+            [[1, "31/07/2026", "-21,17", "-47,81", "COLISAO", "AVENIDA SÃO JOÃO", 10, "RIBEIRAO PRETO"]],
+        )
+
+        result = import_accident_files([uploaded_file])
+
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result.iloc[0]["logradouro"], "AVENIDA SÃO JOÃO")
+
+    def test_consolidates_two_files(self):
+        first = make_upload(
+            "first.csv",
+            [[1, "31/07/2026", -21.17, -47.81, "COLISAO", "RUA A", 10, "RIBEIRAO PRETO"]],
+        )
+        second = make_upload(
+            "second.csv",
+            [[2, "31/07/2026", -21.18, -47.82, "ATROPELAMENTO", "RUA B", 20, "RIBEIRAO PRETO"]],
+        )
+
+        result = import_accident_files([first, second])
+
+        self.assertEqual(result["id_sinistro"].tolist(), [1, 2])
+
+    def test_removes_duplicate_id_and_keeps_first_record(self):
+        first = make_upload(
+            "first.csv",
+            [[1, "31/07/2026", -21.17, -47.81, "COLISAO", "PRIMEIRA RUA", 10, "RIBEIRAO PRETO"]],
+        )
+        second = make_upload(
+            "second.csv",
+            [[1, "31/07/2026", -21.18, -47.82, "COLISAO", "SEGUNDA RUA", 20, "RIBEIRAO PRETO"]],
+        )
+
+        result = import_accident_files([first, second])
+
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result.iloc[0]["logradouro"], "PRIMEIRA RUA")
+
+    def test_deduplication_still_precedes_exclusion(self):
+        first_row = [
+            1, "31/07/2026", -21.17, -47.81, "COLISAO",
+            "PRIMEIRA RUA", 10, "RIBEIRAO PRETO",
+            "", "", "", "", 2,
+        ]
+        second_row = [
+            1, "31/07/2026", -21.18, -47.82, "COLISAO",
+            "SEGUNDA RUA", 20, "RIBEIRAO PRETO",
+            1, "", "", "", 2,
+        ]
+
+        result = import_accident_files([
+            make_upload("first.csv", [first_row]),
+            make_upload("second.csv", [second_row]),
+        ])
+
+        self.assertTrue(result.empty)
+        self.assertEqual(
+            result.attrs[EXCLUSIVELY_UNINJURED_EXCLUDED_COUNT_ATTR],
+            1,
+        )
+
+    def test_multiple_files_share_one_exclusion_count(self):
+        excluded = [
+            1, "31/07/2026", -21.17, -47.81, "COLISAO",
+            "RUA A", 10, "RIBEIRAO PRETO", "", "", "", "", 1,
+        ]
+        retained = [
+            2, "31/07/2026", -21.18, -47.82, "COLISAO",
+            "RUA B", 20, "RIBEIRAO PRETO", 0, "", "", "", 1,
+        ]
+
+        result = import_accident_files([
+            make_upload("first.csv", [excluded]),
+            make_upload("second.csv", [retained]),
+        ])
+
+        self.assertEqual(result["id_sinistro"].tolist(), [2])
+        self.assertEqual(
+            result.attrs[EXCLUSIVELY_UNINJURED_EXCLUDED_COUNT_ATTR],
+            1,
+        )
+
+    def test_rejects_file_without_id_column(self):
+        content = b"data_sinistro;latitude\n31/07/2026;-21.17"
+        uploaded_file = SimpleUploadedFile("missing-id.csv", content)
+
+        with self.assertRaisesRegex(
+            AccidentImportError,
+            "id_sinistro",
+        ):
+            import_accident_files([uploaded_file])
+
+    def test_rejects_empty_file(self):
+        uploaded_file = SimpleUploadedFile("empty.csv", b"")
+
+        with self.assertRaisesRegex(
+            AccidentImportError,
+            "está vazio",
+        ):
+            import_accident_files([uploaded_file])
+
+    def test_reads_latin1_csv_as_fallback(self):
+        uploaded_file = make_upload(
+            "latin1.csv",
+            [[1, "31/07/2026", -21.17, -47.81, "COLISAO", "AVENIDA SÃO JOÃO", 10, "RIBEIRAO PRETO"]],
+            encoding="latin-1",
+        )
+
+        result = import_accident_files([uploaded_file])
+
+        self.assertEqual(result.iloc[0]["logradouro"], "AVENIDA SÃO JOÃO")
+
+    def test_requires_at_least_one_file(self):
+        with self.assertRaisesRegex(
+            AccidentImportError,
+            "pelo menos um arquivo",
+        ):
+            import_accident_files([])
+
+
+class PipelineTests(SimpleTestCase):
+    def test_process_accidents_accepts_dataframe(self):
+        rows = [
+            [index, "31/07/2026", -21.1775, -47.8103, "COLISAO", "RUA A", 10, "RIBEIRAO PRETO"]
+            for index in range(1, 4)
+        ]
+        dataframe = pd.DataFrame(
+            rows,
+            columns=SOURCE_COLUMNS,
+        )
+
+        result = process_accidents(dataframe)
+
+        self.assertEqual(len(result), 1)
+        self.assertTrue(result.iloc[0]["eligible"])
+        self.assertEqual(result.iloc[0]["collisions_1y"], 3)
+
+    @patch("analysis.pipeline.evaluate_historical_criteria")
+    @patch("analysis.pipeline.build_occurrence_points")
+    def test_individual_mode_skips_clusters_and_criteria(
+        self,
+        build_occurrence_points_mock,
+        evaluate_criteria_mock,
+    ):
+        dataframe = pd.DataFrame(
+            [[1, "31/07/2026", -21.1775, -47.8103, "COLISAO", "RUA A", 10, "RIBEIRAO PRETO"]],
+            columns=SOURCE_COLUMNS,
+        )
+        dataframe["tipo_registro"] = "SINISTRO NAO FATAL"
+        dataframe["tipo_via"] = "VIAS URBANAS"
+
+        with patch("analysis.pipeline.cluster_points") as cluster_points_mock:
+            result = process_individual_accidents(dataframe)
+
+        self.assertEqual(len(result), 1)
+        build_occurrence_points_mock.assert_not_called()
+        cluster_points_mock.assert_not_called()
+        evaluate_criteria_mock.assert_not_called()
+
+    def test_individual_mode_omits_invalid_coordinate(self):
+        dataframe = pd.DataFrame(
+            [[1, "31/07/2026", "invalid", -47.8103, "COLISAO", "RUA A", 10, "RIBEIRAO PRETO"]],
+            columns=SOURCE_COLUMNS,
+        )
+        dataframe["tipo_registro"] = "SINISTRO FATAL"
+        dataframe["tipo_via"] = "VIAS URBANAS"
+
+        result = process_individual_accidents(dataframe)
+
+        self.assertTrue(result.empty)
+
+    def test_individual_internal_filter_accepts_allowed_combinations(self):
+        prepared = pd.DataFrame({
+            "id": [1, 2, 3, 4],
+            "record_type": [
+                "SINISTRO NAO FATAL",
+                "SINISTRO FATAL",
+                "SINISTRO NAO FATAL",
+                "SINISTRO FATAL",
+            ],
+            "road_type": [
+                "VIAS URBANAS",
+                "VIAS URBANAS",
+                "NAO DISPONIVEL",
+                "NAO DISPONIVEL",
+            ],
+        })
+
+        with patch("analysis.pipeline.prepare_accidents", return_value=prepared):
+            result = process_individual_accidents(pd.DataFrame(index=range(4)))
+
+        self.assertEqual(result["id"].tolist(), [1, 2, 3, 4])
+
+    def test_individual_internal_filter_rejects_disallowed_combinations(self):
+        prepared = pd.DataFrame({
+            "id": [1, 2, 3, 4],
+            "record_type": [
+                "OUTRO REGISTRO",
+                "SINISTRO FATAL",
+                "SINISTRO NAO FATAL",
+                "OUTRO REGISTRO",
+            ],
+            "road_type": [
+                "VIAS URBANAS",
+                "RODOVIA",
+                "ESTRADAS E RODOVIAS",
+                "RODOVIA",
+            ],
+        })
+
+        with patch("analysis.pipeline.prepare_accidents", return_value=prepared):
+            result = process_individual_accidents(pd.DataFrame(index=range(4)))
+
+        self.assertTrue(result.empty)
+
+    def test_individual_internal_filter_uses_and_between_groups(self):
+        prepared = pd.DataFrame({
+            "id": [1, 2, 3],
+            "record_type": [
+                "SINISTRO FATAL",
+                "OUTRO REGISTRO",
+                "SINISTRO NAO FATAL",
+            ],
+            "road_type": ["RODOVIA", "VIAS URBANAS", "NAO DISPONIVEL"],
+        })
+
+        with patch("analysis.pipeline.prepare_accidents", return_value=prepared):
+            result = process_individual_accidents(pd.DataFrame(index=range(3)))
+
+        self.assertEqual(result["id"].tolist(), [3])
+
+
+class PeriodDataTests(SimpleTestCase):
+    def test_missing_period_columns_remain_unfiltered_by_default(self):
+        normalized = normalize(pd.DataFrame({"id_sinistro": [1]}))
+
+        self.assertTrue(pd.isna(normalized.loc[0, "year"]))
+        self.assertTrue(pd.isna(normalized.loc[0, "month"]))
+        self.assertEqual(extract_available_periods(normalized), [])
+
+    def test_normalizes_numeric_periods_and_rejects_invalid_values(self):
+        source = pd.DataFrame({
+            "ano_sinistro": ["2025", 2024.0, "2025.5", 0, None],
+            "mes_sinistro": ["01", 12.0, 2, 13, None],
+        })
+
+        normalized = normalize(source)
+
+        self.assertEqual(normalized.loc[0, "year"], 2025)
+        self.assertEqual(normalized.loc[0, "month"], 1)
+        self.assertEqual(normalized.loc[1, "year"], 2024)
+        self.assertEqual(normalized.loc[1, "month"], 12)
+        self.assertTrue(pd.isna(normalized.loc[2, "year"]))
+        self.assertTrue(pd.isna(normalized.loc[3, "year"]))
+        self.assertTrue(pd.isna(normalized.loc[3, "month"]))
+
+    def test_extracts_sorted_months_per_year_and_ignores_invalid_rows(self):
+        accidents = pd.DataFrame({
+            "year": [2025, 2024, 2025, 2024, pd.NA],
+            "month": [2, 12, 1, 12, 3],
+        })
+
+        periods = extract_available_periods(accidents)
+
+        self.assertEqual(periods, [
+            {"year": 2024, "months": [12]},
+            {"year": 2025, "months": [1, 2]},
+        ])
+
+    def test_compacts_only_selected_cluster_periods(self):
+        accidents = pd.DataFrame({
+            "cluster_id": [1, 1, 1, 2],
+            "year": [2025, 2025, pd.NA, 2024],
+            "month": [1, 2, pd.NA, 12],
+        })
+
+        summaries = build_cluster_period_summaries(accidents, {1})
+
+        self.assertEqual(summaries, {
+            1: {
+                "total_count": 3,
+                "unperiodized_count": 1,
+                "counts": [
+                    {"year": 2025, "month": 1, "count": 1},
+                    {"year": 2025, "month": 2, "count": 1},
+                ],
+            },
+        })
+
+    def test_periods_reflect_consolidated_deduplicated_files(self):
+        header = ";".join([
+            *SOURCE_COLUMNS,
+            *SEVERITY_SOURCE_COLUMNS,
+            "ano_sinistro",
+            "mes_sinistro",
+        ])
+
+        def upload(name, rows):
+            content = "\n".join([
+                header,
+                *(";".join(str(value) for value in row) for row in rows),
+            ]).encode("utf-8")
+            return SimpleUploadedFile(name, content, content_type="text/csv")
+
+        shared = [
+            1, "31/01/2025", -21.17, -47.81, "COLISAO",
+            "RUA A", 10, "RIBEIRAO PRETO", "", "", "", "", "",
+            2025, 1,
+        ]
+        consolidated = import_accident_files([
+            upload("first.csv", [shared]),
+            upload("second.csv", [
+                shared,
+                [
+                    2, "01/02/2026", -21.18, -47.82, "COLISAO",
+                    "RUA B", 20, "RIBEIRAO PRETO", "", "", "", "", "",
+                    2026, 2,
+                ],
+            ]),
+        ])
+
+        periods = extract_available_periods(normalize(consolidated))
+
+        self.assertEqual(len(consolidated), 2)
+        self.assertEqual(periods, [
+            {"year": 2025, "months": [1]},
+            {"year": 2026, "months": [2]},
+        ])
+
+
+class IndividualMapDataTests(SimpleTestCase):
+    def make_accidents(self, rows):
+        dataframe = pd.DataFrame(rows, columns=INDIVIDUAL_COLUMNS)
+        dataframe["date"] = pd.to_datetime(dataframe["date"], errors="coerce")
+        dataframe["year"] = dataframe["date"].dt.year.astype("Int64")
+        dataframe["month"] = dataframe["date"].dt.month.astype("Int64")
+        return dataframe
+
+    def test_valid_accident_generates_one_item_with_required_fields(self):
+        accidents = self.make_accidents([[
+            10, "SINISTRO NAO FATAL", "2025-05-14", -21.17, -47.81,
+            "COLISAO", "AV. PRESIDENTE VARGAS", 1, 0, 2, 1, 0, 0, 0, 0,
+        ]])
+
+        data = build_individual_map_data(accidents)
+
+        self.assertEqual(len(data), 1)
+        self.assertEqual(data[0]["date"], "14/05/2025")
+        self.assertEqual(data[0]["category"], "collision")
+        self.assertSetEqual(
+            set(data[0]),
+            {"id", "latitude", "longitude", "year", "month", "is_fatal", "record_type", "date", "accident_type", "category", "street", "modes"},
+        )
+
+    def test_individual_payload_identifies_fatality_explicitly(self):
+        accidents = self.make_accidents([
+            [1, "SINISTRO FATAL", "2025-05-14", -21.17, -47.81,
+             "COLISAO", "RUA A", 0, 0, 0, 1, 0, 0, 0, 0],
+            [2, "SINISTRO NAO FATAL", "2025-05-15", -21.18, -47.82,
+             "CHOQUE", "RUA B", 0, 0, 0, 1, 0, 0, 0, 0],
+        ])
+
+        data = build_individual_map_data(accidents)
+
+        self.assertIs(data[0]["is_fatal"], True)
+        self.assertIs(data[1]["is_fatal"], False)
+
+    def test_same_coordinates_remain_independent(self):
+        rows = [
+            [identifier, "NAO FATAL", "2025-05-14", -21.17, -47.81,
+             "COLISAO", "RUA A", 0, 0, 0, 1, 0, 0, 0, 0]
+            for identifier in (41, 42)
+        ]
+
+        data = build_individual_map_data(self.make_accidents(rows))
+
+        self.assertEqual([item["id"] for item in data], ["41", "42"])
+
+    def test_zero_and_nan_modes_are_omitted(self):
+        accidents = self.make_accidents([[
+            10, "NAO FATAL", None, -21.17, -47.81, "CHOQUE", "RUA A",
+            0, float("nan"), 2, 0, 0, 0, 0, 0,
+        ]])
+
+        data = build_individual_map_data(accidents)
+
+        self.assertEqual(data[0]["date"], "Não disponível")
+        self.assertEqual(data[0]["modes"], [{"name": "Motocicleta", "quantity": 2}])
+
+    def test_multiple_positive_modes_are_serialized(self):
+        accidents = self.make_accidents([[
+            10, "NAO FATAL", "2025-05-14", -21.17, -47.81,
+            "ATROPELAMENTO", "RUA A", 1, 1, 0, 2, 0, 0, 0, 0,
+        ]])
+
+        modes = build_individual_map_data(accidents)[0]["modes"]
+
+        self.assertEqual(modes, [
+            {"name": "Pedestre", "quantity": 1},
+            {"name": "Bicicleta", "quantity": 1},
+            {"name": "Automóvel", "quantity": 2},
+        ])
+
+    def test_categories_have_expected_visual_classification(self):
+        expected = {
+            "ATROPELAMENTO": "pedestrian",
+            "CHOQUE": "crash",
+            "COLISAO": "collision",
+            "NAO_DISPONIVEL": "unavailable",
+            "OUTRO": "other",
+            "TIPO INESPERADO": "other",
+        }
+        rows = [
+            [index, "NAO FATAL", "2025-05-14", -21.17, -47.81,
+             accident_type, "RUA A", 0, 0, 0, 0, 0, 0, 0, 0]
+            for index, accident_type in enumerate(expected, start=1)
+        ]
+
+        data = build_individual_map_data(self.make_accidents(rows))
+
+        self.assertEqual(
+            [item["category"] for item in data],
+            list(expected.values()),
+        )
+
+
+class MapFilterDataTests(SimpleTestCase):
+    def test_criteria_exposes_each_filter_condition(self):
+        one_year = pd.DataFrame(
+            [
+                {
+                    "cluster_id": 1,
+                    "accident_count": 5,
+                    "collisions": 3,
+                    "pedestrians": 2,
+                },
+                {
+                    "cluster_id": 2,
+                    "accident_count": 1,
+                    "collisions": 0,
+                    "pedestrians": 0,
+                },
+            ]
+        )
+        three_years = pd.DataFrame(
+            [
+                {
+                    "cluster_id": 1,
+                    "accident_count": 6,
+                    "collisions": 6,
+                    "pedestrians": 3,
+                },
+                {
+                    "cluster_id": 2,
+                    "accident_count": 11,
+                    "collisions": 7,
+                    "pedestrians": 4,
+                },
+            ]
+        )
+
+        result = evaluate_criteria(one_year, three_years)
+        cluster_1 = result[result["cluster_id"] == 1].iloc[0]
+        cluster_2 = result[result["cluster_id"] == 2].iloc[0]
+
+        self.assertTrue(cluster_1["collision_1y_met"])
+        self.assertFalse(cluster_1["collision_3y_met"])
+        self.assertTrue(cluster_1["pedestrian_1y_met"])
+        self.assertFalse(cluster_1["pedestrian_3y_met"])
+        self.assertFalse(cluster_2["collision_1y_met"])
+        self.assertTrue(cluster_2["collision_3y_met"])
+        self.assertFalse(cluster_2["pedestrian_1y_met"])
+        self.assertTrue(cluster_2["pedestrian_3y_met"])
+
+    def test_map_data_contains_boolean_filter_flags(self):
+        rows = [
+            [index, "31/07/2026", -21.1775, -47.8103, "COLISAO", "RUA A", 10, "RIBEIRAO PRETO"]
+            for index in range(1, 4)
+        ]
+        dataframe = pd.DataFrame(rows, columns=SOURCE_COLUMNS)
+        dataframe["ano_sinistro"] = [2025, 2025, 2026]
+        dataframe["mes_sinistro"] = [1, 2, 1]
+
+        result = build_map_data(process_accidents(dataframe))
+
+        self.assertEqual(len(result), 1)
+        self.assertIs(result[0]["collision_1y_met"], True)
+        self.assertIs(result[0]["collision_3y_met"], False)
+        self.assertIs(result[0]["pedestrian_1y_met"], False)
+        self.assertIs(result[0]["pedestrian_3y_met"], False)
+        self.assertEqual(result[0]["period_summary"], {
+            "total_count": 3,
+            "unperiodized_count": 0,
+            "counts": [
+                {"year": 2025, "month": 1, "count": 1},
+                {"year": 2025, "month": 2, "count": 1},
+                {"year": 2026, "month": 1, "count": 1},
+            ],
+        })
+
+
+class HistoricalCriteriaTests(SimpleTestCase):
+    @staticmethod
+    def build_accidents(rows):
+        dataframe = pd.DataFrame(
+            rows,
+            columns=[
+                "id",
+                "date",
+                "cluster_id",
+                "accident_type",
+            ],
+        )
+        dataframe["date"] = pd.to_datetime(
+            dataframe["date"]
+        )
+        return dataframe
+
+    def test_preserves_historical_eligibility_after_newer_event(self):
+        accidents = self.build_accidents(
+            [
+                [1, "2024-01-10", 1, "COLISAO"],
+                [2, "2024-04-10", 1, "COLISAO"],
+                [3, "2024-08-10", 1, "COLISAO"],
+                [4, "2026-07-01", 2, "CHOQUE"],
+            ]
+        )
+
+        result = evaluate_historical_criteria(accidents)
+        cluster = result[result["cluster_id"] == 1].iloc[0]
+
+        self.assertTrue(cluster["collision_1y_met"])
+        self.assertTrue(cluster["eligible"])
+
+    def test_combines_events_across_dataset_boundary(self):
+        accidents = self.build_accidents(
+            [
+                [1, "2024-07-01", 1, "COLISAO"],
+                [2, "2024-12-01", 1, "COLISAO"],
+                [3, "2025-06-30", 1, "COLISAO"],
+            ]
+        )
+
+        result = evaluate_historical_criteria(accidents)
+        cluster = result.iloc[0]
+
+        self.assertEqual(cluster["collisions_1y"], 3)
+        self.assertTrue(cluster["collision_1y_met"])
+
+    def test_finds_seven_collisions_in_historical_three_year_window(self):
+        accidents = self.build_accidents(
+            [
+                [1, "2018-01-01", 1, "COLISAO"],
+                [2, "2020-01-01", 1, "COLISAO"],
+                [3, "2020-06-01", 1, "COLISAO"],
+                [4, "2021-01-01", 1, "COLISAO"],
+                [5, "2021-06-01", 1, "COLISAO"],
+                [6, "2022-01-01", 1, "COLISAO"],
+                [7, "2022-06-01", 1, "COLISAO"],
+                [8, "2023-01-01", 1, "COLISAO"],
+            ]
+        )
+
+        result = evaluate_historical_criteria(accidents)
+        cluster = result.iloc[0]
+
+        self.assertEqual(cluster["collisions_3y"], 7)
+        self.assertTrue(cluster["collision_3y_met"])
+
+    def test_finds_pedestrian_criteria_in_historical_windows(self):
+        accidents = self.build_accidents(
+            [
+                [1, "2020-01-01", 1, "ATROPELAMENTO"],
+                [2, "2020-06-01", 1, "ATROPELAMENTO"],
+                [3, "2022-01-01", 2, "ATROPELAMENTO"],
+                [4, "2022-10-01", 2, "ATROPELAMENTO"],
+                [5, "2023-08-01", 2, "ATROPELAMENTO"],
+                [6, "2024-07-01", 2, "ATROPELAMENTO"],
+            ]
+        )
+
+        result = evaluate_historical_criteria(accidents).set_index(
+            "cluster_id"
+        )
+
+        self.assertTrue(result.loc[1, "pedestrian_1y_met"])
+        self.assertTrue(result.loc[2, "pedestrian_3y_met"])
+
+    def test_does_not_combine_events_outside_valid_windows(self):
+        accidents = self.build_accidents(
+            [
+                [1, "2015-01-01", 1, "COLISAO"],
+                [2, "2017-01-02", 1, "COLISAO"],
+                [3, "2019-01-03", 1, "COLISAO"],
+                [4, "2015-01-01", 1, "ATROPELAMENTO"],
+                [5, "2019-01-02", 1, "ATROPELAMENTO"],
+            ]
+        )
+
+        result = evaluate_historical_criteria(accidents)
+        cluster = result.iloc[0]
+
+        self.assertFalse(cluster["collision_1y_met"])
+        self.assertFalse(cluster["collision_3y_met"])
+        self.assertFalse(cluster["pedestrian_1y_met"])
+        self.assertFalse(cluster["pedestrian_3y_met"])
+        self.assertFalse(cluster["eligible"])
+
+class AnalysisViewTests(TestCase):
+    map_data = [
+        {
+            "cluster_id": 7,
+            "latitude": -21.17,
+            "longitude": -47.81,
+        }
+    ]
+
+    @patch("accidents.views.process_accidents")
+    def test_get_shows_empty_map_and_upload_form(
+        self,
+        process_accidents_mock,
+    ):
+        response = self.client.get("/")
+
+        self.assertEqual(response.status_code, 200)
+        process_accidents_mock.assert_not_called()
+        self.assertEqual(response.context["results"], [])
+        self.assertEqual(response.context["map_data"], [])
+        self.assertContains(response, 'name="files"')
+        self.assertContains(response, "multiple")
+        self.assertContains(response, 'id="selected-files"')
+        self.assertContains(response, 'id="analyze-button"')
+        self.assertContains(response, "disabled")
+        self.assertContains(response, 'id="clear-files-button"')
+        self.assertContains(response, "Limpar arquivos")
+        self.assertContains(response, 'id="tools-panel"', count=1)
+        self.assertContains(response, 'id="data-tab"')
+        self.assertContains(response, 'id="filters-tab"')
+        self.assertNotContains(response, 'data-filter-field="collision_1y_met"')
+        self.assertNotContains(response, 'data-filter-field="collision_3y_met"')
+        self.assertNotContains(response, 'data-filter-field="pedestrian_1y_met"')
+        self.assertNotContains(response, 'data-filter-field="pedestrian_3y_met"')
+        self.assertNotContains(response, "data-individual-gravity")
+        self.assertNotContains(response, 'id="period-year-filter"')
+        self.assertNotContains(response, 'id="clear-filters-button"')
+        self.assertContains(response, 'class="filters-empty-state"')
+        self.assertContains(response, "filters-icon.svg")
+        self.assertContains(
+            response,
+            "Não foi possível carregar os filtros. Por favor faça o upload "
+            "de um arquivo csv válido e tente novamente.",
+        )
+        self.assertContains(response, 'id="minimize-tools-panel"')
+        self.assertContains(response, 'id="open-tools-panel"')
+        self.assertContains(response, 'data-has-active-analysis="false"')
+        self.assertContains(response, "left-arrow-button.svg")
+        self.assertContains(response, "right-arrow-button.svg")
+        self.assertFalse(response.context["has_individual_analysis"])
+        self.assertContains(response, 'data-has-individual-analysis="false"')
+        self.assertNotContains(response, 'id="signaling-radius-toggle"')
+        self.assertNotContains(response, 'id="upload-panel"')
+        self.assertNotContains(response, 'id="filter-panel"')
+        self.assertEqual(response.context["initial_tool_tab"], "data")
+
+    @patch("accidents.views.build_map_data")
+    @patch("accidents.views.process_accidents")
+    def test_post_with_valid_csv_processes_uploaded_data(
+        self,
+        process_accidents_mock,
+        build_map_data_mock,
+    ):
+        session = self.client.session
+        session[ANALYSIS_SESSION_KEY] = {
+            "analysis_id": "old-analysis",
+            "view_mode": "individual",
+            "map_data": [{"id": "old"}],
+            "import_summary": {},
+        }
+        session.save()
+        results = pd.DataFrame({"eligible": [True]})
+        results.attrs["available_periods"] = [
+            {"year": 2025, "months": [1, 2]},
+            {"year": 2026, "months": [1]},
+        ]
+        process_accidents_mock.return_value = results
+        build_map_data_mock.return_value = self.map_data
+        uploaded_file = make_upload(
+            "valid.csv",
+            [[1, "31/07/2026", -21.17, -47.81, "COLISAO", "RUA A", 10, "RIBEIRAO PRETO"]],
+        )
+
+        response = self.client.post(
+            "/",
+            {"files": uploaded_file},
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.url, reverse("analysis"))
+        response = self.client.get(response.url)
+        consolidated = process_accidents_mock.call_args.args[0]
+        self.assertEqual(len(consolidated), 1)
+        self.assertEqual(response.context["map_data"], self.map_data)
+        self.assertEqual(
+            response.context["initial_tool_tab"],
+            "filters",
+        )
+        self.assertContains(response, 'data-has-active-analysis="true"')
+        self.assertFalse(response.context["has_individual_analysis"])
+        self.assertContains(response, 'data-has-individual-analysis="false"')
+        self.assertContains(response, 'id="signaling-radius-toggle"', count=1)
+        self.assertContains(response, 'data-min-search-radius-meters="10"')
+        self.assertContains(response, 'data-max-search-radius-meters="300"')
+        self.assertContains(response, 'data-filter-field="collision_1y_met"')
+        self.assertContains(response, 'id="period-year-filter"')
+        self.assertContains(response, 'value="2025" data-period-year')
+        self.assertEqual(response.context["available_periods"], [
+            {"year": 2025, "months": [1, 2]},
+            {"year": 2026, "months": [1]},
+        ])
+        self.assertNotContains(response, "data-individual-category")
+        self.assertNotContains(response, "data-individual-gravity")
+        self.assertEqual(
+            response.context["import_summary"],
+            {
+                "file_count": 1,
+                "file_names": ["valid"],
+                "accident_count": 1,
+                "eligible_count": 1,
+                "exclusively_uninjured_excluded_count": 0,
+            },
+        )
+        self.assertEqual(response.context["view_mode"], "clusters")
+        self.assertEqual(
+            self.client.session[ANALYSIS_SESSION_KEY]["view_mode"],
+            "clusters",
+        )
+        self.assertEqual(
+            self.client.session[ANALYSIS_SESSION_KEY]["available_periods"],
+            [
+                {"year": 2025, "months": [1, 2]},
+                {"year": 2026, "months": [1]},
+            ],
+        )
+        self.assertNotEqual(
+            self.client.session[ANALYSIS_SESSION_KEY]["analysis_id"],
+            "old-analysis",
+        )
+
+    def test_clear_request_removes_transient_individual_analysis(self):
+        session = self.client.session
+        session[ANALYSIS_SESSION_KEY] = {
+            "view_mode": "individual",
+            "map_data": [{"id": "old"}],
+            "import_summary": {},
+        }
+        session.save()
+
+        response = self.client.get("/?clear=1")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn(
+            ANALYSIS_SESSION_KEY,
+            self.client.session,
+        )
+
+    @patch("accidents.views.build_individual_map_data")
+    @patch("accidents.views.process_individual_accidents")
+    @patch("accidents.views.process_accidents")
+    def test_individual_mode_uses_only_individual_pipeline(
+        self,
+        process_accidents_mock,
+        process_individual_mock,
+        build_individual_mock,
+    ):
+        individual_results = pd.DataFrame({"id": [1]})
+        individual_results.attrs["available_periods"] = [
+            {"year": 2026, "months": [7]},
+        ]
+        individual_map_data = [{"id": "1", "latitude": -21.17, "longitude": -47.81}]
+        process_individual_mock.return_value = individual_results
+        build_individual_mock.return_value = individual_map_data
+        uploaded_file = make_upload(
+            "valid.csv",
+            [[1, "31/07/2026", -21.17, -47.81, "COLISAO", "RUA A", 10, "RIBEIRAO PRETO"]],
+        )
+
+        response = self.client.post(
+            "/",
+            {"files": uploaded_file, "view_mode": "individual"},
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.url, reverse("analysis"))
+        response = self.client.get(response.url)
+        process_accidents_mock.assert_not_called()
+        process_individual_mock.assert_called_once()
+        build_individual_mock.assert_called_once_with(individual_results)
+        self.assertEqual(response.context["map_data"], individual_map_data)
+        self.assertEqual(response.context["view_mode"], "individual")
+        self.assertTrue(response.context["has_individual_analysis"])
+        self.assertEqual(
+            response.context["available_periods"],
+            [{"year": 2026, "months": [7]}],
+        )
+        self.assertEqual(
+            self.client.session[ANALYSIS_SESSION_KEY]["map_data"],
+            individual_map_data,
+        )
+        self.assertEqual(response.context["initial_tool_tab"], "filters")
+        self.assertContains(response, 'data-has-active-analysis="true"')
+        self.assertContains(response, 'data-has-individual-analysis="true"')
+        self.assertContains(response, 'id="signaling-radius-toggle"', count=1)
+        self.assertContains(response, 'data-min-search-radius-meters="10"')
+        self.assertContains(response, 'data-max-search-radius-meters="300"')
+        self.assertNotContains(response, 'id="signaling-survey-data"')
+        self.assertEqual(response.context["import_summary"]["displayed_count"], 1)
+        self.assertContains(response, "Filtre os pontos por tipo de sinistro individual")
+        self.assertContains(response, "data-individual-category", count=5)
+        self.assertContains(response, "data-individual-gravity", count=3)
+        self.assertContains(response, "Gravidade", count=1)
+        self.assertNotContains(response, 'data-filter-field="collision_1y_met"')
+        self.assertNotContains(response, 'data-filter-field="collision_3y_met"')
+        self.assertNotContains(response, 'data-filter-field="pedestrian_1y_met"')
+        self.assertNotContains(response, 'data-filter-field="pedestrian_3y_met"')
+        self.assertNotContains(response, "2+ em 1 ano")
+        self.assertNotContains(response, "4+ em 3 anos")
+
+    @patch("accidents.views.build_individual_map_data", return_value=[])
+    @patch("accidents.views.process_individual_accidents", return_value=pd.DataFrame())
+    def test_exclusively_uninjured_rows_do_not_reach_individual_pipeline(
+        self,
+        process_individual_mock,
+        _build_individual_mock,
+    ):
+        excluded = [
+            1, "31/07/2026", -21.17, -47.81, "COLISAO",
+            "RUA A", 10, "RIBEIRAO PRETO", "", "", "", "", 2,
+        ]
+        retained = [
+            2, "31/07/2026", -21.18, -47.82, "COLISAO",
+            "RUA B", 20, "RIBEIRAO PRETO", 0, "", "", "", 2,
+        ]
+
+        response = self.client.post(
+            "/",
+            {
+                "files": make_upload("valid.csv", [excluded, retained]),
+                "view_mode": "individual",
+            },
+        )
+
+        processed_input = process_individual_mock.call_args.args[0]
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(processed_input["id_sinistro"].tolist(), [2])
+        response = self.client.get(response.url)
+        self.assertEqual(
+            response.context["import_summary"][
+                "exclusively_uninjured_excluded_count"
+            ],
+            1,
+        )
+
+    @patch("accidents.views.build_map_data", return_value=[])
+    @patch("accidents.views.process_accidents", return_value=pd.DataFrame())
+    def test_exclusively_uninjured_rows_do_not_reach_eligibility_pipeline(
+        self,
+        process_accidents_mock,
+        _build_map_data_mock,
+    ):
+        excluded = [
+            1, "31/07/2026", -21.17, -47.81, "COLISAO",
+            "RUA A", 10, "RIBEIRAO PRETO", "", "", "", "", 2,
+        ]
+        retained = [
+            2, "31/07/2026", -21.18, -47.82, "COLISAO",
+            "RUA B", 20, "RIBEIRAO PRETO", "", 1, "", "", 2,
+        ]
+
+        response = self.client.post(
+            "/",
+            {"files": make_upload("valid.csv", [excluded, retained])},
+        )
+
+        processed_input = process_accidents_mock.call_args.args[0]
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(processed_input["id_sinistro"].tolist(), [2])
+
+    @patch("accidents.views.build_individual_map_data", return_value=[])
+    @patch("accidents.views.process_individual_accidents")
+    def test_empty_individual_analysis_remains_available_for_surveys(
+        self,
+        process_individual_mock,
+        build_individual_mock,
+    ):
+        individual_results = pd.DataFrame()
+        process_individual_mock.return_value = individual_results
+        uploaded_file = make_upload(
+            "valid.csv",
+            [[1, "31/07/2026", -21.17, -47.81, "COLISAO", "RUA A", 10, "RIBEIRAO PRETO"]],
+        )
+
+        response = self.client.post(
+            "/",
+            {"files": uploaded_file, "view_mode": "individual"},
+        )
+
+        self.assertEqual(response.status_code, 302)
+        response = self.client.get(response.url)
+        build_individual_mock.assert_called_once_with(individual_results)
+        self.assertEqual(response.context["view_mode"], "individual")
+        self.assertEqual(response.context["map_data"], [])
+        self.assertTrue(response.context["has_individual_analysis"])
+        self.assertContains(response, 'data-has-individual-analysis="true"')
+        self.assertEqual(
+            self.client.session[ANALYSIS_SESSION_KEY]["map_data"],
+            [],
+        )
+
+    @patch("accidents.views.process_individual_accidents")
+    @patch("accidents.views.process_accidents")
+    def test_rejects_unknown_view_mode(
+        self,
+        process_accidents_mock,
+        process_individual_mock,
+    ):
+        uploaded_file = make_upload(
+            "valid.csv",
+            [[1, "31/07/2026", -21.17, -47.81, "COLISAO", "RUA A", 10, "RIBEIRAO PRETO"]],
+        )
+
+        response = self.client.post(
+            "/",
+            {"files": uploaded_file, "view_mode": "unknown"},
+        )
+
+        self.assertContains(response, "Modo de visualização inválido")
+        process_accidents_mock.assert_not_called()
+        process_individual_mock.assert_not_called()
+
+    @patch("accidents.views.build_map_data", return_value=[])
+    @patch("accidents.views.process_accidents", return_value=pd.DataFrame())
+    def test_post_consolidates_two_csv_files(
+        self,
+        process_accidents_mock,
+        _build_map_data_mock,
+    ):
+        first = make_upload(
+            "first.part.csv",
+            [[1, "31/07/2026", -21.17, -47.81, "COLISAO", "RUA A", 10, "RIBEIRAO PRETO"]],
+        )
+        second = make_upload(
+            "second.CSV",
+            [[2, "31/07/2026", -21.18, -47.82, "COLISAO", "RUA B", 20, "RIBEIRAO PRETO"]],
+        )
+
+        response = self.client.post(
+            "/",
+            {"files": [first, second]},
+        )
+
+        consolidated = process_accidents_mock.call_args.args[0]
+        self.assertEqual(response.status_code, 302)
+        response = self.client.get(response.url)
+        self.assertEqual(
+            consolidated["id_sinistro"].tolist(),
+            [1, 2],
+        )
+        self.assertEqual(
+            response.context["import_summary"]["file_count"],
+            2,
+        )
+        self.assertEqual(
+            response.context["import_summary"]["file_names"],
+            ["first.part", "second"],
+        )
+        self.assertContains(response, "Nome do arquivo: first.part, second")
+        self.assertEqual(response.context["import_summary"]["eligible_count"], 0)
+        self.assertContains(response, 'data-filter-field="collision_1y_met"')
+        self.assertNotContains(response, 'class="filters-empty-state"')
+        self.assertContains(response, 'id="period-year-filter"')
+        self.assertEqual(response.context["available_periods"], [])
+        self.assertContains(response, "Período indisponível nos dados carregados")
+
+    @patch("accidents.views.build_map_data", return_value=[])
+    @patch("accidents.views.process_accidents", return_value=pd.DataFrame())
+    def test_post_deduplicates_ids_before_processing(
+        self,
+        process_accidents_mock,
+        _build_map_data_mock,
+    ):
+        first = make_upload(
+            "first.csv",
+            [[1, "31/07/2026", -21.17, -47.81, "COLISAO", "PRIMEIRA RUA", 10, "RIBEIRAO PRETO"]],
+        )
+        second = make_upload(
+            "second.csv",
+            [[1, "31/07/2026", -21.18, -47.82, "COLISAO", "SEGUNDA RUA", 20, "RIBEIRAO PRETO"]],
+        )
+
+        response = self.client.post(
+            "/",
+            {"files": [first, second]},
+        )
+
+        consolidated = process_accidents_mock.call_args.args[0]
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(len(consolidated), 1)
+        self.assertEqual(
+            consolidated.iloc[0]["logradouro"],
+            "PRIMEIRA RUA",
+        )
+
+    @patch("accidents.views.process_accidents")
+    def test_post_without_file_shows_error_and_empty_map(
+        self,
+        process_accidents_mock,
+    ):
+        response = self.client.post("/", {})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Selecione pelo menos um arquivo")
+        process_accidents_mock.assert_not_called()
+        self.assertEqual(response.context["map_data"], [])
+
+    @patch("accidents.views.process_accidents")
+    def test_post_with_empty_file_shows_error(
+        self,
+        process_accidents_mock,
+    ):
+        uploaded_file = SimpleUploadedFile("empty.csv", b"")
+
+        response = self.client.post(
+            "/",
+            {"files": uploaded_file},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "está vazio")
+        process_accidents_mock.assert_not_called()
+        self.assertEqual(response.context["map_data"], [])
+
+    @patch("accidents.views.process_accidents")
+    def test_post_without_required_column_shows_error(
+        self,
+        process_accidents_mock,
+    ):
+        uploaded_file = SimpleUploadedFile(
+            "missing-id.csv",
+            b"data_sinistro;latitude\n31/07/2026;-21.17",
+        )
+
+        response = self.client.post(
+            "/",
+            {"files": uploaded_file},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "id_sinistro")
+        self.assertNotContains(response, "Nome do arquivo:")
+        process_accidents_mock.assert_not_called()
+        self.assertEqual(response.context["map_data"], [])

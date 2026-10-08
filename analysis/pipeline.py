@@ -18,8 +18,7 @@ from analysis.spatial import (
 )
 
 from analysis.criteria import (
-    count_cluster_accidents,
-    evaluate_criteria,
+    evaluate_historical_criteria,
     add_criterion_classification,
 )
 
@@ -30,16 +29,13 @@ from analysis.results import (
 from analysis.location import (
     build_location_summary,
 )
+from analysis.periods import (
+    build_cluster_period_summaries,
+    extract_available_periods,
+)
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-
-INPUT_PATH = (
-    BASE_DIR
-    / "data"
-    / "raw"
-    / "sinistros_2025-2026.csv"
-)
 
 MUNICIPALITY_PATH = (
     BASE_DIR
@@ -49,26 +45,18 @@ MUNICIPALITY_PATH = (
     / "municipio.json"
 )
 
+INDIVIDUAL_RECORD_TYPES = {
+    "SINISTRO NAO FATAL",
+    "SINISTRO FATAL",
+}
+INDIVIDUAL_ROAD_TYPES = {
+    "VIAS URBANAS",
+    "NAO DISPONIVEL",
+}
 
-def run_analysis():
 
-    # ========================================================
-    # LEITURA
-    # ========================================================
-
-    try:
-        df = pd.read_csv(
-            INPUT_PATH,
-            sep=";",
-            encoding="utf-8",
-        )
-
-    except UnicodeDecodeError:
-        df = pd.read_csv(
-            INPUT_PATH,
-            sep=";",
-            encoding="latin-1",
-        )
+def prepare_accidents(df: pd.DataFrame) -> pd.DataFrame:
+    """Normaliza e conserva apenas sinistros com coordenadas municipais válidas."""
 
     # ========================================================
     # NORMALIZAÇÃO
@@ -111,6 +99,31 @@ def run_analysis():
         ribeirao["coordinate_status"] == "VALID"
     ].copy()
 
+    return valid_coordinates
+
+
+def process_individual_accidents(df: pd.DataFrame) -> pd.DataFrame:
+    """Prepara sinistros individuais sem executar a análise por clusters."""
+    valid_accidents = prepare_accidents(df)
+    record_mask = valid_accidents["record_type"].isin(
+        INDIVIDUAL_RECORD_TYPES
+    )
+    road_mask = valid_accidents["road_type"].isin(
+        INDIVIDUAL_ROAD_TYPES
+    )
+    filtered = valid_accidents[record_mask & road_mask].copy()
+    filtered.attrs["individual_metrics"] = {
+        "received_count": len(df),
+        "valid_coordinate_count": len(valid_accidents),
+        "internal_filter_count": len(filtered),
+    }
+    filtered.attrs["available_periods"] = extract_available_periods(filtered)
+    return filtered
+
+
+def process_accidents(df: pd.DataFrame) -> pd.DataFrame:
+    valid_coordinates = prepare_accidents(df)
+
     # ========================================================
     # PONTOS DE OCORRÊNCIA
     # ========================================================
@@ -141,48 +154,11 @@ def run_analysis():
     )
 
     # ========================================================
-    # PERÍODO DA ANÁLISE
-    # ========================================================
-
-    end_date = normalized["date"].max()
-
-    one_year_start = (
-        end_date
-        - pd.DateOffset(years=1)
-    )
-
-    three_years_start = (
-        end_date
-        - pd.DateOffset(years=3)
-    )
-
-    # ========================================================
-    # CONTAGEM 1 ANO
-    # ========================================================
-
-    one_year = count_cluster_accidents(
-        clustered_accidents,
-        one_year_start,
-        end_date,
-    )
-
-    # ========================================================
-    # CONTAGEM 3 ANOS
-    # ========================================================
-
-    three_years = count_cluster_accidents(
-        clustered_accidents,
-        three_years_start,
-        end_date,
-    )
-
-    # ========================================================
     # CRITÉRIOS
     # ========================================================
 
-    criteria_result = evaluate_criteria(
-        one_year,
-        three_years,
+    criteria_result = evaluate_historical_criteria(
+        clustered_accidents
     )
 
     criteria_result = add_criterion_classification(
@@ -209,6 +185,19 @@ def run_analysis():
     analysis_result = build_location_summary(
         clustered_accidents,
         analysis_result,
+    )
+
+    eligible_cluster_ids = set(
+        analysis_result["cluster_id"].astype("int64").tolist()
+    )
+    analysis_result.attrs["available_periods"] = extract_available_periods(
+        valid_coordinates
+    )
+    analysis_result.attrs["cluster_period_summaries"] = (
+        build_cluster_period_summaries(
+            clustered_accidents,
+            eligible_cluster_ids,
+        )
     )
 
     print(
