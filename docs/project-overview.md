@@ -118,5 +118,6 @@ Esse estado é usado para manter a análise atual sem persistir o payload bruto 
 
 - [reference/accident-pipeline.md](reference/accident-pipeline.md)
 - [reference/signaling-and-reports.md](reference/signaling-and-reports.md)
+- [reference/databases.md](reference/databases.md)
 
 Documentos históricos e de auditoria ficam em [history/](history/).
