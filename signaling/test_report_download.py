@@ -63,7 +63,7 @@ class SignalingReportDownloadTests(TestCase):
 
     def response_bytes(self, response):
         content = b"".join(response.streaming_content)
-        response.close()
+        self.assertTrue(response.closed)
         return content
 
     def accident_item(
@@ -251,6 +251,20 @@ class SignalingReportDownloadTests(TestCase):
         self.assertIn(f"relatorio_local_{self.point.id}_", response["Content-Disposition"])
         self.assertGreater(len(content), 0)
         self.assertTrue(is_zipfile(BytesIO(content)))
+
+    def test_consuming_download_closes_response_and_keeps_orm_usable(self):
+        self.set_individual_analysis()
+        response = self.client.post(self.url, self.valid_form_data())
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.streaming)
+        self.assertFalse(response.closed)
+
+        content = self.response_bytes(response)
+
+        self.assertTrue(response.closed)
+        self.assertTrue(is_zipfile(BytesIO(content)))
+        self.assertEqual(SignalingPoint.objects.get(pk=self.point.pk).status, self.point.status)
+        self.assertEqual(self.client.get(self.url).status_code, 200)
 
     def test_get_applies_one_collection_to_all_survey_indicators(self):
         self.set_individual_analysis([
