@@ -9,6 +9,11 @@ urlpatterns = [
     ),
 
     path(
+        "signaling/",
+        include("signaling.urls"),
+    ),
+
+    path(
         "",
         include("accidents.urls"),
     ),

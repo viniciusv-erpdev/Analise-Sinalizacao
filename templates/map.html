@@ -19,7 +19,29 @@
         href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
     >
 
+    <link
+        rel="stylesheet"
+        href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css"
+        integrity="sha384-sRIl4kxILFvY47J16cr9ZwB07vP4J8+LH7qKQnuqkuIAvNWLzeN8tE5YBujZqJLB"
+        crossorigin="anonymous"
+    >
+
+    <link 
+    rel="icon"
+    type="image/svg+xml"
+    href="{% static 'images/favicon.svg' %}">
+
     <style>
+
+        :root {
+            --marker-collision: #6f42c1;
+            --marker-pedestrian: #dc3545;
+            --marker-both: #fd7e14;
+            --marker-individual-crash: #198754;
+            --marker-individual-collision: #0d6efd;
+            --marker-individual-unavailable: #ffc107;
+            --marker-individual-other: #0dcaf0;
+        }
 
         html,
         body {
@@ -32,22 +54,1786 @@
             width: 100%;
         }
 
+        .map-marker {
+            border: 0;
+            background: transparent;
+        }
+
+        .map-marker__dot {
+            display: block;
+            box-sizing: border-box;
+            width: 18px;
+            height: 18px;
+            border: 3px solid #fff;
+            border-radius: 50%;
+            background: var(--marker-color);
+            box-shadow: 0 1px 5px rgba(0, 0, 0, 0.55);
+        }
+
+        .map-marker--collision,
+        .map-popup__category--collision {
+            --marker-color: var(--marker-collision);
+        }
+
+        .map-marker--pedestrian,
+        .map-popup__category--pedestrian {
+            --marker-color: var(--marker-pedestrian);
+        }
+
+        .map-marker--both,
+        .map-popup__category--both {
+            --marker-color: var(--marker-both);
+        }
+
+        .map-marker--individual-pedestrian,
+        .map-popup__category--individual-pedestrian {
+            --marker-color: var(--marker-pedestrian);
+        }
+
+        .map-marker--individual-crash,
+        .map-popup__category--individual-crash {
+            --marker-color: var(--marker-individual-crash);
+        }
+
+        .map-marker--individual-collision,
+        .map-popup__category--individual-collision {
+            --marker-color: var(--marker-individual-collision);
+        }
+
+        .map-marker--individual-unavailable,
+        .map-popup__category--individual-unavailable {
+            --marker-color: var(--marker-individual-unavailable);
+            color: #212529;
+        }
+
+        .map-marker--individual-other,
+        .map-popup__category--individual-other {
+            --marker-color: var(--marker-individual-other);
+            color: #212529;
+        }
+
+        .signaling-marker {
+            border: 0;
+            background: transparent;
+        }
+
+        .signaling-marker__pin {
+            position: absolute;
+            top: 2px;
+            left: 6px;
+            display: block;
+            box-sizing: border-box;
+            width: 34px;
+            height: 34px;
+            border: 2px solid #fff;
+            border-radius: 50% 50% 50% 0;
+            background: var(--signaling-color);
+            box-shadow: -2px 2px 4px rgba(0, 0, 0, 0.4);
+            transform: rotate(-45deg);
+        }
+
+        .signaling-marker__inner {
+            position: absolute;
+            top: 4px;
+            left: 4px;
+            display: flex;
+            width: 22px;
+            height: 22px;
+            align-items: center;
+            justify-content: center;
+            border-radius: 50%;
+            background: #fff;
+            transform: rotate(45deg);
+        }
+
+        .signaling-marker__symbol {
+            display: block;
+            width: 15px;
+            height: 15px;
+            background: url("{% static 'icons/signaling/marker-generic.svg' %}") center / contain no-repeat;
+        }
+
+        .signaling-marker--ok {
+            --signaling-color: #198754;
+        }
+
+        .signaling-marker--incomplete {
+            --signaling-color: #ffc107;
+        }
+
+        .signaling-marker--absent {
+            --signaling-color: #dc3545;
+        }
+
+        .signaling-popup {
+            min-width: 190px;
+            width: min(350px, calc(100vw - 80px));
+            max-width: 350px;
+            color: #212529;
+            font-family: Arial, sans-serif;
+            line-height: 1.35;
+        }
+
+        .signaling-popup h2 {
+            margin: 0 0 10px;
+            font-size: 15px;
+        }
+
+        .signaling-popup__header {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .signaling-popup__header h2 {
+            margin: 0;
+        }
+
+        .signaling-status-editor {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 5px;
+            margin-top: 8px;
+            padding: 7px;
+            border: 1px solid #dee2e6;
+            border-radius: 6px;
+            background: #f8f9fa;
+        }
+
+        .signaling-status-editor .btn {
+            flex: 1 1 calc(50% - 5px);
+            min-width: 0;
+        }
+
+        .signaling-popup .btn {
+            min-height: 32px;
+            white-space: normal;
+        }
+
+        .signaling-popup__heading {
+            margin: 12px 0 6px;
+            color: #6c757d;
+            font-size: 11px;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+        }
+
+        .signaling-interventions {
+            margin: 0;
+            padding: 0;
+            list-style: none;
+        }
+
+        .signaling-interventions-panel {
+            max-height: 210px;
+            padding: 4px 7px;
+            overflow-y: auto;
+            border: 1px solid #dee2e6;
+            border-radius: 6px;
+            background: #fff;
+            scrollbar-width: thin;
+        }
+
+        .signaling-intervention {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) auto auto;
+            gap: 6px;
+            align-items: center;
+            padding: 7px 0;
+            border-bottom: 1px solid #f1f3f5;
+        }
+
+        .signaling-intervention:last-child {
+            border-bottom: 0;
+        }
+
+        .signaling-intervention__type,
+        .signaling-intervention__actions {
+            display: flex;
+            gap: 6px;
+            align-items: center;
+        }
+
+        .signaling-intervention__type {
+            min-width: 0;
+        }
+
+        .signaling-intervention__type-name {
+            overflow-wrap: anywhere;
+        }
+
+        .signaling-intervention__icon {
+            width: 22px;
+            height: 22px;
+            object-fit: contain;
+        }
+
+        .signaling-intervention__condition {
+            display: inline-flex;
+            gap: 4px;
+            align-items: center;
+            white-space: nowrap;
+        }
+
+        .signaling-condition-icon {
+            width: 18px;
+            height: 18px;
+            object-fit: contain;
+        }
+
+        .signaling-delete-icon {
+            width: 16px;
+            height: 16px;
+            object-fit: contain;
+        }
+
+        .signaling-toggle-icon {
+            width: 16px;
+            height: 16px;
+            object-fit: contain;
+        }
+
+        .signaling-notes-icon {
+            width: 16px;
+            height: 16px;
+            object-fit: contain;
+        }
+
+        .signaling-intervention__toggle {
+            display: inline-flex;
+            width: 30px;
+            height: 30px;
+            padding: 7px;
+            align-items: center;
+            justify-content: center;
+            border: 0;
+            border-radius: 50%;
+            background: transparent;
+            cursor: pointer;
+        }
+
+        .signaling-intervention__notes {
+            display: inline-flex;
+            width: 30px;
+            height: 30px;
+            padding: 7px;
+            align-items: center;
+            justify-content: center;
+            border: 0;
+            border-radius: 50%;
+            background: transparent;
+            cursor: pointer;
+        }
+
+        .signaling-intervention__notes:hover {
+            background: rgba(13, 110, 253, 0.08);
+        }
+
+        .signaling-intervention__notes:focus-visible {
+            outline: 2px solid #0d6efd;
+            outline-offset: 2px;
+        }
+
+        .signaling-intervention__toggle:hover {
+            background: rgba(255, 193, 7, 0.14);
+        }
+
+        .signaling-intervention__toggle:focus-visible {
+            outline: 2px solid #ffc107;
+            outline-offset: 2px;
+        }
+
+        .signaling-intervention__remove {
+            flex: none;
+            display: inline-flex;
+            width: 30px;
+            height: 30px;
+            padding: 7px;
+            align-items: center;
+            justify-content: center;
+            border: 0;
+            border-radius: 50%;
+            background: transparent;
+            cursor: pointer;
+            transition: background-color 0.15s, opacity 0.15s;
+        }
+
+        .signaling-intervention__remove:hover {
+            background: rgba(220, 53, 69, 0.08);
+            opacity: 0.75;
+        }
+
+        .signaling-intervention__remove:focus-visible {
+            outline: 2px solid #dc3545;
+            outline-offset: 2px;
+        }
+
+        .signaling-intervention__remove:disabled {
+            cursor: wait;
+            opacity: 0.45;
+        }
+
+        .signaling-option-icon {
+            flex: none;
+            width: 18px;
+            height: 18px;
+            object-fit: contain;
+        }
+
+        .signaling-popup__empty {
+            margin: 4px 0;
+            color: #6c757d;
+            font-size: 12px;
+        }
+
+        .signaling-intervention-form fieldset {
+            margin: 10px 0;
+            padding: 0;
+            border: 0;
+        }
+
+        .signaling-intervention-form legend {
+            margin-bottom: 5px;
+            font-weight: 600;
+        }
+
+        .signaling-intervention-form label {
+            cursor: pointer;
+        }
+
+        .signaling-catalog {
+            display: grid;
+            grid-template-columns: 30px minmax(0, 1fr) 30px;
+            gap: 5px;
+            align-items: stretch;
+        }
+
+        .signaling-catalog__viewport {
+            display: flex;
+            gap: 7px;
+            padding: 3px 2px 8px;
+            overflow-x: auto;
+            overscroll-behavior-x: contain;
+            scroll-behavior: smooth;
+            scroll-snap-type: x proximity;
+            scrollbar-width: thin;
+        }
+
+        .signaling-catalog__option {
+            position: relative;
+            display: flex;
+            flex: 0 0 82px;
+            min-height: 88px;
+            padding: 7px 5px;
+            flex-direction: column;
+            gap: 5px;
+            align-items: center;
+            justify-content: center;
+            border: 1px solid #ced4da;
+            border-radius: 6px;
+            background: #fff;
+            color: #212529;
+            cursor: pointer;
+            scroll-snap-align: start;
+            text-align: center;
+            transition: border-color 0.15s, background-color 0.15s, box-shadow 0.15s;
+        }
+
+        .signaling-catalog__option:hover {
+            border-color: #86b7fe;
+            background: #f8f9fa;
+        }
+
+        .signaling-catalog__option:focus-visible {
+            outline: 2px solid #0d6efd;
+            outline-offset: 2px;
+        }
+
+        .signaling-catalog__option.is-selected {
+            border: 2px solid #0d6efd;
+            background: #e7f1ff;
+            box-shadow: 0 1px 3px rgba(13, 110, 253, 0.22);
+        }
+
+        .signaling-catalog__option.is-selected::after {
+            position: absolute;
+            top: 3px;
+            right: 5px;
+            content: "\2713";
+            color: #0d6efd;
+            font-weight: 700;
+        }
+
+        .signaling-catalog__icon {
+            width: 34px;
+            height: 34px;
+            object-fit: contain;
+        }
+
+        .signaling-catalog__label {
+            max-width: 100%;
+            font-size: 11px;
+            line-height: 1.15;
+            overflow-wrap: anywhere;
+        }
+
+        .signaling-catalog__arrow {
+            align-self: center;
+            width: 30px;
+            height: 38px;
+            padding: 0;
+        }
+
+        .signaling-selection-summary {
+            min-height: 20px;
+            margin: 8px 0 10px;
+            font-size: 12px;
+        }
+
+        .signaling-condition-options,
+        .signaling-intervention-actions {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 7px;
+        }
+
+        .signaling-intervention-actions {
+            margin-top: 7px;
+        }
+
+        .signaling-condition-option,
+        .signaling-intervention-actions .btn {
+            display: inline-flex;
+            height: 38px;
+            gap: 5px;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .signaling-study-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+        }
+
+        .signaling-create-popup {
+            width: min(250px, calc(100vw - 100px));
+            max-width: 100%;
+        }
+
+        .signaling-study-actions .btn {
+            flex: 1 1 calc(50% - 6px);
+            min-width: 0;
+            padding-right: 7px;
+            padding-left: 7px;
+        }
+
+        .signaling-form-feedback {
+            margin: 8px 0 0;
+            padding: 6px 8px;
+            font-size: 12px;
+        }
+
+        .intersection-problems {
+            max-height: min(600px, calc(100dvh - 160px));
+            overflow-y: auto;
+            overscroll-behavior: contain;
+        }
+
+        .intersection-problems__list {
+            max-height: 150px;
+            overscroll-behavior: contain;
+        }
+
+        .intersection-problems__choice {
+            display: block;
+            width: 100%;
+            margin: 3px 0;
+            padding: 7px;
+            border: 1px solid var(--bs-border-color);
+            border-radius: 6px;
+            background: var(--bs-body-bg);
+            color: inherit;
+            font: inherit;
+            text-align: left;
+            overflow-wrap: anywhere;
+        }
+
+        .intersection-problems__choice:hover:not(:disabled) {
+            background: var(--bs-tertiary-bg);
+        }
+
+        .intersection-problems__choice[aria-pressed="true"] {
+            background: rgba(var(--bs-primary-rgb), 0.10);
+            border-color: rgba(var(--bs-primary-rgb), 0.5);
+            box-shadow: 0 0 0 2px rgba(var(--bs-primary-rgb), 0.10);
+        }
+
+        .intersection-problems__choice:focus-visible {
+            outline: 2px solid var(--bs-primary);
+            outline-offset: 1px;
+        }
+
+        .intersection-problems__choice:disabled:not([aria-pressed="true"]) {
+            opacity: 0.65;
+        }
+
+        .intersection-problems__record {
+            padding: 7px 0;
+            overflow-wrap: anywhere;
+        }
+
+        .intersection-problems__record + .intersection-problems__record {
+            border-top: 1px solid var(--bs-border-color);
+        }
+
+        .signaling-notes-input {
+            max-height: 110px;
+            resize: vertical;
+        }
+
+        .signaling-notes-panel {
+            margin-top: 8px;
+            padding: 9px;
+            border: 1px solid #dee2e6;
+            border-radius: 6px;
+            background: #f8f9fa;
+        }
+
+        .signaling-notes-panel__header {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 6px;
+        }
+
+        .signaling-notes-panel__actions {
+            display: inline-flex;
+            gap: 4px;
+            align-items: center;
+        }
+
+        .signaling-notes-panel__edit {
+            padding: 2px 6px;
+            font-size: 12px;
+            line-height: 1.25;
+        }
+
+        .signaling-notes-panel__close {
+            width: 28px;
+            height: 28px;
+            padding: 0;
+            border: 0;
+            border-radius: 50%;
+            background: transparent;
+            cursor: pointer;
+            font-size: 20px;
+            line-height: 1;
+        }
+
+        .signaling-notes-panel__close:hover,
+        .signaling-notes-panel__close:focus-visible {
+            background: #e9ecef;
+        }
+
+        .signaling-notes-panel__content {
+            max-height: 130px;
+            margin: 0;
+            overflow-y: auto;
+            overflow-wrap: anywhere;
+            white-space: pre-wrap;
+            font-size: 12px;
+        }
+
+        .signaling-notes-panel__textarea {
+            max-height: 130px;
+            resize: vertical;
+        }
+
+        .signaling-notes-panel__error {
+            margin: 6px 0 0;
+            color: #b02a37;
+            font-size: 12px;
+        }
+
+        @media (max-width: 320px) {
+            .signaling-intervention {
+                grid-template-columns: minmax(0, 1fr) auto;
+            }
+
+            .signaling-intervention__condition {
+                grid-column: 1;
+                margin-left: 28px;
+            }
+
+            .signaling-intervention__actions {
+                grid-column: 2;
+                grid-row: 1 / span 2;
+            }
+
+            .signaling-catalog {
+                grid-template-columns: minmax(0, 1fr);
+            }
+
+            .signaling-catalog__arrow {
+                display: none;
+            }
+        }
+
+        .map-popup {
+            min-width: 240px;
+            max-width: 300px;
+            color: #212529;
+            font-family: Arial, sans-serif;
+            line-height: 1.35;
+        }
+
+        .map-popup__title {
+            margin: 0 0 8px;
+            overflow-wrap: anywhere;
+            font-size: 16px;
+        }
+
+        .map-popup__category {
+            display: inline-block;
+            margin-bottom: 10px;
+            padding: 4px 8px;
+            border-radius: 999px;
+            color: #fff;
+            background: var(--marker-color);
+            font-size: 12px;
+            font-weight: 700;
+        }
+
+        .map-popup__section {
+            margin-top: 10px;
+            padding-top: 9px;
+            border-top: 1px solid #dee2e6;
+        }
+
+        .map-popup__section-title {
+            margin: 0 0 5px;
+            font-size: 13px;
+        }
+
+        .map-popup__navigation {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-top: 10px;
+            padding-top: 8px;
+            border-top: 1px solid #dee2e6;
+            color: #6c757d;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .map-popup__navigation-controls {
+            display: inline-flex;
+            gap: 6px;
+            align-items: center;
+        }
+
+        .map-popup__navigation-button {
+            display: inline-flex;
+            width: 38px;
+            height: 38px;
+            padding: 7px;
+            align-items: center;
+            justify-content: center;
+            border: 0;
+            border-radius: 50%;
+            color: #47679a;
+            background: transparent;
+            box-shadow: none;
+            cursor: pointer;
+        }
+
+        .map-popup__navigation-button:hover {
+            color: #0d6efd;
+        }
+
+        .map-popup__navigation-button:focus-visible {
+            outline: 2px solid #0d6efd;
+            outline-offset: 1px;
+        }
+
+        .map-popup__navigation-icon {
+            display: block;
+            width: 24px;
+            height: 24px;
+            background: currentColor;
+            -webkit-mask: var(--navigation-icon) center / contain no-repeat;
+            mask: var(--navigation-icon) center / contain no-repeat;
+            pointer-events: none;
+        }
+
+        .individual-marker-counter {
+            border: 0;
+            background: transparent;
+            cursor: pointer;
+            pointer-events: auto;
+        }
+
+        .individual-marker-counter__badge {
+            display: inline-flex;
+            min-width: 20px;
+            height: 20px;
+            padding: 0 5px;
+            align-items: center;
+            justify-content: center;
+            border: 2px solid #fff;
+            border-radius: 999px;
+            background: #343a40;
+            color: #fff;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+            font-size: 11px;
+            font-weight: 700;
+            line-height: 1;
+        }
+
+        .map-popup__criteria {
+            margin: 0;
+            padding: 0;
+            list-style: none;
+        }
+
+        .map-popup__criteria-title {
+            margin: 6px 0 2px;
+            font-size: 12px;
+        }
+
+        .map-popup__criteria li {
+            margin: 3px 0;
+        }
+
+        .map-popup__criteria li::before {
+            content: "\2713";
+            margin-right: 6px;
+            color: #198754;
+            font-weight: 700;
+        }
+
+        .map-popup__stats {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 12px;
+        }
+
+        .map-popup__stats th,
+        .map-popup__stats td {
+            padding: 3px 5px;
+            text-align: right;
+        }
+
+        .map-popup__stats th:first-child,
+        .map-popup__stats td:first-child {
+            padding-left: 0;
+            text-align: left;
+        }
+
+        .map-popup__details {
+            display: grid;
+            grid-template-columns: auto minmax(0, 1fr);
+            gap: 5px 10px;
+            margin: 0;
+            font-size: 12px;
+        }
+
+        .map-popup__details dt {
+            color: #6c757d;
+            font-weight: 600;
+        }
+
+        .map-popup__details dd {
+            margin: 0;
+            overflow-wrap: anywhere;
+        }
+
+        .map-popup__modes {
+            width: 100%;
+            font-size: 12px;
+        }
+
+        .map-popup__modes td {
+            padding: 2px 0;
+        }
+
+        .map-popup__modes td:last-child {
+            text-align: right;
+            font-weight: 600;
+        }
+
+        .map-legend {
+            padding: 9px 11px;
+            border-radius: 6px;
+            background: rgba(255, 255, 255, 0.94);
+            box-shadow: 0 1px 5px rgba(0, 0, 0, 0.35);
+            color: #212529;
+            font: 13px/1.4 Arial, sans-serif;
+        }
+
+        .map-legend strong {
+            display: block;
+            margin-bottom: 5px;
+        }
+
+        .map-legend__item {
+            display: flex;
+            gap: 7px;
+            align-items: center;
+            margin: 3px 0;
+        }
+
+        .map-legend__dot {
+            width: 11px;
+            height: 11px;
+            border: 2px solid #fff;
+            border-radius: 50%;
+            box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.18);
+        }
+
+        .map-legend__dot--collision {
+            background: var(--marker-collision);
+        }
+
+        .map-legend__dot--pedestrian {
+            background: var(--marker-pedestrian);
+        }
+
+        .map-legend__dot--both {
+            background: var(--marker-both);
+        }
+
+        .map-legend__dot--individual-pedestrian { background: var(--marker-pedestrian); }
+        .map-legend__dot--individual-crash { background: var(--marker-individual-crash); }
+        .map-legend__dot--individual-collision { background: var(--marker-individual-collision); }
+        .map-legend__dot--individual-unavailable { background: var(--marker-individual-unavailable); }
+        .map-legend__dot--individual-other { background: var(--marker-individual-other); }
+
+        .map-legend__fatal-halo {
+            position: relative;
+            width: 17px;
+            height: 17px;
+            flex: none;
+            border: 1px solid rgba(220, 38, 38, 0.8);
+            border-radius: 50%;
+            background: rgba(220, 38, 38, 0.25);
+        }
+
+        .map-legend__common-marker {
+            width: 11px;
+            height: 11px;
+            flex: none;
+            border: 2px solid #fff;
+            border-radius: 50%;
+            background: #6c757d;
+            box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.18);
+        }
+
+        .map-legend__fatal-halo::after {
+            position: absolute;
+            inset: 4px;
+            border: 1px solid #fff;
+            border-radius: 50%;
+            background: #6c757d;
+            content: "";
+        }
+
+        .tools-panel {
+            position: absolute;
+            top: 12px;
+            right: 12px;
+            z-index: 1000;
+            box-sizing: border-box;
+            width: min(360px, calc(100% - 70px));
+            max-height: calc(100% - 24px);
+            padding: 16px;
+            overflow-y: auto;
+            border-radius: 8px;
+            background: rgba(255, 255, 255, 0.96);
+            box-shadow: 0 1px 5px rgba(0, 0, 0, 0.35);
+            font-family: Arial, sans-serif;
+            font-size: 14px;
+        }
+
+        .tools-panel h1 {
+            margin: 0;
+            font-size: 18px;
+        }
+
+        .tools-panel-header {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 4px;
+        }
+
+        .minimize-panel-button {
+            flex: none;
+            width: 28px;
+            height: 28px;
+            padding: 0;
+            border: 0;
+            border-radius: 50%;
+            color: #495057;
+            background: transparent;
+            cursor: pointer;
+            font-size: 20px;
+            line-height: 1;
+        }
+
+        .minimize-panel-button:hover {
+            background: #e9ecef;
+        }
+
+        .open-tools-panel-button {
+            position: absolute;
+            top: 12px;
+            right: 12px;
+            z-index: 1000;
+            width: 48px;
+            height: 48px;
+            padding: 0;
+            border: 0;
+            border-radius: 50%;
+            color: #fff;
+            background: #0d6efd;
+            box-shadow: 0 1px 5px rgba(0, 0, 0, 0.35);
+            cursor: pointer;
+            font-size: 22px;
+        }
+
+        .open-tools-panel-button:hover {
+            background: #0b5ed7;
+        }
+
+        .filter-group {
+            margin: 12px 0 0;
+            padding: 0;
+            border: 0;
+        }
+
+        .filter-group legend {
+            margin-bottom: 5px;
+            font-weight: 600;
+        }
+
+        .filter-option {
+            display: block;
+            margin: 6px 0;
+            cursor: pointer;
+        }
+
+        .filter-option input {
+            margin-right: 6px;
+        }
+
+        .period-filter-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 8px;
+        }
+
+        .period-filter-field > span {
+            display: block;
+            min-width: 0;
+            color: #495057;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .period-multiselect {
+            position: relative;
+            margin-top: 3px;
+        }
+
+        .period-multiselect summary {
+            overflow: hidden;
+            list-style: none;
+            white-space: nowrap;
+            text-overflow: ellipsis;
+            cursor: pointer;
+        }
+
+        .period-multiselect summary::-webkit-details-marker { display: none; }
+
+        .period-multiselect__options {
+            display: grid;
+            gap: 5px;
+            max-height: 190px;
+            padding: 8px;
+            overflow-y: auto;
+            border: 1px solid #dee2e6;
+            border-top: 0;
+            border-radius: 0 0 0.375rem 0.375rem;
+            background: #fff;
+        }
+
+        .period-multiselect__options label {
+            display: flex;
+            gap: 6px;
+            align-items: center;
+            margin: 0;
+            font-size: 13px;
+            font-weight: 400;
+            cursor: pointer;
+        }
+
+        @media (max-width: 420px) {
+            .period-filter-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .filter-option--category {
+            display: flex;
+            gap: 7px;
+            align-items: center;
+        }
+
+        .filter-category-dot {
+            width: 10px;
+            height: 10px;
+            flex: none;
+            border-radius: 50%;
+            background: var(--filter-category-color);
+            box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.2);
+        }
+
+        .filter-category-dot--pedestrian { --filter-category-color: var(--marker-pedestrian); }
+        .filter-category-dot--crash { --filter-category-color: var(--marker-individual-crash); }
+        .filter-category-dot--collision { --filter-category-color: var(--marker-individual-collision); }
+        .filter-category-dot--unavailable { --filter-category-color: var(--marker-individual-unavailable); }
+        .filter-category-dot--other { --filter-category-color: var(--marker-individual-other); }
+
+        .active-filter-summary {
+            margin: 12px 0 0;
+            color: #6c757d;
+            font-size: 12px;
+        }
+
+        .filter-counter {
+            margin: 12px 0 0;
+            color: #495057;
+            font-weight: 600;
+        }
+
+        .filters-empty-state {
+            display: flex;
+            min-height: 190px;
+            padding: 24px 16px;
+            flex-direction: column;
+            gap: 12px;
+            align-items: center;
+            justify-content: center;
+            color: #6c757d;
+            text-align: center;
+        }
+
+        .filters-empty-state img {
+            width: 42px;
+            height: 42px;
+            object-fit: contain;
+            opacity: 0.7;
+        }
+
+        .filters-empty-state p {
+            max-width: 280px;
+            margin: 0;
+            line-height: 1.45;
+        }
+
+        .clear-filters-button {
+            width: 100%;
+            margin-top: 10px;
+            padding: 8px 12px;
+            border: 1px solid #6c757d;
+            border-radius: 4px;
+            color: #495057;
+            background: #fff;
+            cursor: pointer;
+            font-weight: 600;
+        }
+
+        .clear-filters-button:hover {
+            color: #fff;
+            background: #6c757d;
+        }
+
+        [hidden] {
+            display: none !important;
+        }
+
+        .tools-tabs {
+            display: flex;
+            margin: 12px 0;
+            border-bottom: 1px solid #dee2e6;
+        }
+
+        .tools-tab {
+            flex: 1;
+            padding: 9px 8px;
+            border: 0;
+            border-bottom: 3px solid transparent;
+            color: #6c757d;
+            background: transparent;
+            cursor: pointer;
+            font-weight: 600;
+        }
+
+        .tools-tab:hover {
+            color: #0d6efd;
+        }
+
+        .tools-tab.is-active {
+            border-bottom-color: #0d6efd;
+            color: #0d6efd;
+        }
+
+        .upload-intro {
+            margin: 0 0 12px;
+            color: #495057;
+            line-height: 1.4;
+        }
+
+        .view-mode-options {
+            display: grid;
+            gap: 8px;
+            margin-bottom: 12px;
+        }
+
+        .view-mode-option {
+            display: block;
+            padding: 9px 10px;
+            border: 1px solid #ced4da;
+            border-radius: 6px;
+            cursor: pointer;
+        }
+
+        .btn-check:checked + .view-mode-option {
+            border-color: #0d6efd;
+            background: #eef5ff;
+            box-shadow: 0 0 0 1px #0d6efd;
+        }
+
+        .view-mode-option strong,
+        .view-mode-option small {
+            display: block;
+        }
+
+        .view-mode-option small {
+            margin-top: 2px;
+            color: #6c757d;
+            line-height: 1.3;
+        }
+
+        .file-input {
+            position: absolute;
+            width: 1px;
+            height: 1px;
+            overflow: hidden;
+            clip: rect(0, 0, 0, 0);
+            white-space: nowrap;
+        }
+
+        .file-selector {
+            display: block;
+            padding: 18px 12px;
+            border: 2px dashed #6c757d;
+            border-radius: 6px;
+            text-align: center;
+            cursor: pointer;
+            transition: border-color 0.15s, background-color 0.15s;
+        }
+
+        .file-selector:hover,
+        .file-selector:focus-within {
+            border-color: #0d6efd;
+            background: #f4f8ff;
+        }
+
+        .file-selector strong,
+        .file-selector span {
+            display: block;
+        }
+
+        .file-selector span {
+            margin-top: 4px;
+            color: #6c757d;
+            font-size: 12px;
+        }
+
+        .file-selection-summary {
+            margin: 12px 0 6px;
+            font-weight: 600;
+        }
+
+        .selected-files {
+            max-height: 130px;
+            margin: 0 0 12px;
+            padding: 0;
+            overflow-y: auto;
+            list-style: none;
+        }
+
+        .selected-files li {
+            display: flex;
+            gap: 8px;
+            justify-content: space-between;
+            padding: 5px 2px;
+            border-bottom: 1px solid #e9ecef;
+        }
+
+        .selected-file-name {
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .selected-file-name::before {
+            content: "\2713";
+            margin-right: 6px;
+            color: #198754;
+        }
+
+        .selected-file-size {
+            flex: none;
+            color: #6c757d;
+            font-size: 12px;
+        }
+
+        .analyze-button {
+            width: 100%;
+            padding: 9px 12px;
+            border: 0;
+            border-radius: 4px;
+            color: #fff;
+            background: #0d6efd;
+            cursor: pointer;
+            font-weight: 600;
+        }
+
+        .analyze-button:disabled {
+            background: #9aa0a6;
+            cursor: not-allowed;
+        }
+
+        .clear-files-button {
+            width: 100%;
+            margin-top: 8px;
+            padding: 8px 12px;
+            border: 1px solid #6c757d;
+            border-radius: 4px;
+            color: #495057;
+            background: #fff;
+            cursor: pointer;
+            font-weight: 600;
+        }
+
+        .clear-files-button:hover {
+            color: #fff;
+            background: #6c757d;
+        }
+
+        .upload-feedback {
+            margin-top: 12px;
+            padding: 10px;
+            border-radius: 5px;
+            line-height: 1.4;
+        }
+
+        .upload-success {
+            color: #0f5132;
+            background: #d1e7dd;
+        }
+
+        .upload-feedback strong {
+            display: block;
+            margin-bottom: 4px;
+        }
+
+        .upload-result-list {
+            margin: 0;
+            padding-left: 18px;
+        }
+
+        .upload-error {
+            color: #842029;
+            background: #f8d7da;
+        }
+
+        @media (max-width: 520px) {
+            .tools-panel {
+                top: 10px;
+                right: 10px;
+                width: calc(100% - 70px);
+                max-height: calc(100% - 20px);
+            }
+        }
+
     </style>
 
 </head>
 
 <body>
 
-    <div id="map"></div>
+    <div
+        id="map"
+        data-has-active-analysis="{% if import_summary %}true{% else %}false{% endif %}"
+        data-left-arrow-icon-url="{% static 'icons/signaling/left-arrow-button.svg' %}"
+        data-right-arrow-icon-url="{% static 'icons/signaling/right-arrow-button.svg' %}"
+    ></div>
+
+    <section
+        id="tools-panel"
+        class="tools-panel"
+        aria-label="Ferramentas de análise de sinistros"
+        data-has-server-state="{% if import_summary or import_error %}true{% else %}false{% endif %}"
+        data-initial-tab="{{ initial_tool_tab }}"
+    >
+        <div class="tools-panel-header">
+            <h1>Análise de sinistros</h1>
+
+            <button
+                id="minimize-tools-panel"
+                class="minimize-panel-button"
+                type="button"
+                aria-label="Minimizar painel de ferramentas"
+                aria-controls="tools-panel"
+                aria-expanded="true"
+                title="Minimizar painel"
+            >
+                &minus;
+            </button>
+        </div>
+
+        <div
+            class="tools-tabs"
+            role="tablist"
+            aria-label="Ferramentas do mapa"
+        >
+            <button
+                id="data-tab"
+                class="tools-tab{% if initial_tool_tab == 'data' %} is-active{% endif %}"
+                type="button"
+                role="tab"
+                aria-controls="data-tab-panel"
+                aria-selected="{% if initial_tool_tab == 'data' %}true{% else %}false{% endif %}"
+                tabindex="{% if initial_tool_tab == 'data' %}0{% else %}-1{% endif %}"
+                data-tools-tab="data"
+            >
+                Dados
+            </button>
+
+            <button
+                id="filters-tab"
+                class="tools-tab{% if initial_tool_tab == 'filters' %} is-active{% endif %}"
+                type="button"
+                role="tab"
+                aria-controls="filters-tab-panel"
+                aria-selected="{% if initial_tool_tab == 'filters' %}true{% else %}false{% endif %}"
+                tabindex="{% if initial_tool_tab == 'filters' %}0{% else %}-1{% endif %}"
+                data-tools-tab="filters"
+            >
+                Filtros
+            </button>
+        </div>
+
+        <div
+            id="data-tab-panel"
+            role="tabpanel"
+            aria-labelledby="data-tab"
+            data-tools-tab-panel="data"
+            {% if initial_tool_tab != 'data' %}hidden{% endif %}
+        >
+            <p
+                class="upload-intro"
+            >
+                Selecione um ou mais CSVs do Infosiga para visualizar no mapa.
+            </p>
+
+            <form
+                id="upload-form"
+                method="post"
+                enctype="multipart/form-data"
+            >
+                {% csrf_token %}
+
+                <fieldset class="mb-3">
+                    <legend class="fs-6 mb-2">Modo de visualização</legend>
+                    <div class="view-mode-options">
+                        <input
+                            class="btn-check"
+                            type="radio"
+                            name="view_mode"
+                            id="view-mode-clusters"
+                            value="clusters"
+                            {% if view_mode != 'individual' %}checked{% endif %}
+                        >
+                        <label class="view-mode-option" for="view-mode-clusters">
+                            <strong>Pontos elegíveis</strong>
+                            <small>Agrupa os sinistros e identifica locais que atendem aos critérios de intervenção do CONTRAN.</small>
+                        </label>
+
+                        <input
+                            class="btn-check"
+                            type="radio"
+                            name="view_mode"
+                            id="view-mode-individual"
+                            value="individual"
+                            {% if view_mode == 'individual' %}checked{% endif %}
+                        >
+                        <label class="view-mode-option" for="view-mode-individual">
+                            <strong>Todos os Sinistros</strong>
+                            <small>Exibe individualmente cada sinistro com coordenadas válidas.</small>
+                        </label>
+                    </div>
+                </fieldset>
+
+                <input
+                    id="file-input"
+                    class="file-input"
+                    type="file"
+                    name="files"
+                    accept=".csv"
+                    multiple
+                    required
+                >
+
+                <label
+                    class="file-selector"
+                    for="file-input"
+                >
+                    <strong>Selecionar arquivos CSV</strong>
+                    <span>Você pode selecionar vários arquivos do Infosiga</span>
+                </label>
+
+                <p
+                    id="file-selection-summary"
+                    class="file-selection-summary"
+                    aria-live="polite"
+                >
+                    Nenhum arquivo selecionado
+                </p>
+
+                <ul
+                    id="selected-files"
+                    class="selected-files"
+                ></ul>
+
+                <button
+                    id="analyze-button"
+                    class="analyze-button"
+                    type="submit"
+                    disabled
+                >
+                    Analisar arquivos
+                </button>
+
+                <button
+                    id="clear-files-button"
+                    class="clear-files-button"
+                    type="button"
+                >
+                    Limpar arquivos
+                </button>
+            </form>
+
+            {% if import_summary %}
+                <div class="upload-feedback upload-success">
+                    <strong>Análise concluída</strong>
+                    <ul class="upload-result-list">
+                        <li>Nome do arquivo: {{ import_summary.file_names|join:", " }}</li>
+                        <li>Arquivos: {{ import_summary.file_count }}</li>
+                        <li>
+                            Sinistros excluídos por conter exclusivamente registros de ilesos:
+                            {{ import_summary.exclusively_uninjured_excluded_count }}
+                        </li>
+                        {% if view_mode == 'individual' %}
+                            <li>Sinistros importados: {{ import_summary.accident_count }}</li>
+                            <li>Coordenadas válidas: {{ import_summary.valid_coordinate_count }}</li>
+                            <li>Após filtro interno: {{ import_summary.internal_filter_count }}</li>
+                            <li>Sinistros exibidos: {{ import_summary.displayed_count }}</li>
+                        {% else %}
+                            <li>Sinistros únicos: {{ import_summary.accident_count }}</li>
+                            <li>Locais elegíveis: {{ import_summary.eligible_count }}</li>
+                        {% endif %}
+                    </ul>
+                </div>
+            {% endif %}
+
+            {% if import_error %}
+                <div
+                    class="upload-feedback upload-error"
+                    role="alert"
+                >
+                    <strong>Não foi possível processar os arquivos.</strong>
+                    {{ import_error }}
+                </div>
+            {% endif %}
+        </div>
+
+        <div
+            id="filters-tab-panel"
+            role="tabpanel"
+            aria-labelledby="filters-tab"
+            data-tools-tab-panel="filters"
+            {% if initial_tool_tab != 'filters' %}hidden{% endif %}
+        >
+            {% if not import_summary %}
+                <div class="filters-empty-state" role="status">
+                    <img
+                        src="{% static 'icons/signaling/filters-icon.svg' %}"
+                        alt=""
+                        aria-hidden="true"
+                    >
+                    <p>Não foi possível carregar os filtros. Por favor faça o upload de um arquivo csv válido e tente novamente.</p>
+                </div>
+            {% else %}
+            <fieldset class="filter-group">
+                <legend>Período dos sinistros</legend>
+                <div class="period-filter-grid">
+                    <div class="period-filter-field">
+                        <span>Anos</span>
+                        <details
+                            id="period-year-filter"
+                            class="period-multiselect"
+                        >
+                            <summary class="form-select form-select-sm" data-period-summary>
+                                Todos os anos
+                            </summary>
+                            <div class="period-multiselect__options">
+                                <label>
+                                    <input type="checkbox" data-period-all-years checked>
+                                    <span>Todos os anos</span>
+                                </label>
+                                {% for period in available_periods %}
+                                    <label>
+                                        <input type="checkbox" value="{{ period.year }}" data-period-year>
+                                        <span>{{ period.year }}</span>
+                                    </label>
+                                {% endfor %}
+                            </div>
+                        </details>
+                    </div>
+                    <div class="period-filter-field">
+                        <span>Meses</span>
+                        <details
+                            id="period-month-filter"
+                            class="period-multiselect"
+                        >
+                            <summary class="form-select form-select-sm" data-period-summary>
+                                Todos os meses disponíveis
+                            </summary>
+                            <div class="period-multiselect__options" data-period-month-options></div>
+                        </details>
+                    </div>
+                </div>
+                {% if not available_periods %}
+                    <p class="small text-secondary mb-0 mt-2">
+                        Período indisponível nos dados carregados.
+                    </p>
+                {% endif %}
+            </fieldset>
+            {% if view_mode == 'individual' %}
+                <p class="small text-secondary mb-2">
+                    Filtre os pontos por tipo de sinistro individual.
+                </p>
+                <fieldset class="filter-group">
+                    <legend>Filtrar sinistros</legend>
+                    {% for category, label in individual_filter_categories %}
+                        <label class="filter-option filter-option--category">
+                            <input
+                                type="checkbox"
+                                data-individual-category="{{ category }}"
+                                data-filter-label="{{ label }}"
+                            >
+                            <span class="filter-category-dot filter-category-dot--{{ category }}" aria-hidden="true"></span>
+                            <span>{{ label }}</span>
+                        </label>
+                    {% endfor %}
+                </fieldset>
+                <fieldset class="filter-group">
+                    <legend>Gravidade</legend>
+                    <label class="filter-option">
+                        <input
+                            type="radio"
+                            name="individual-gravity"
+                            value="all"
+                            data-individual-gravity
+                            checked
+                        >
+                        Todos
+                    </label>
+                    <label class="filter-option">
+                        <input
+                            type="radio"
+                            name="individual-gravity"
+                            value="fatal"
+                            data-individual-gravity
+                        >
+                        Somente fatais
+                    </label>
+                    <label class="filter-option">
+                        <input
+                            type="radio"
+                            name="individual-gravity"
+                            value="non_fatal"
+                            data-individual-gravity
+                        >
+                        Somente não fatais
+                    </label>
+                </fieldset>
+                <p class="active-filter-summary">
+                    <strong>Selecionados:</strong>
+                    <span id="active-filter-categories">Todas as categorias</span>
+                </p>
+            {% else %}
+            <fieldset class="filter-group">
+                <legend>Colisões</legend>
+
+                <label class="filter-option">
+                    <input
+                        type="checkbox"
+                        data-filter-field="collision_1y_met"
+                    >
+                    3+ em 1 ano
+                </label>
+
+                <label class="filter-option">
+                    <input
+                        type="checkbox"
+                        data-filter-field="collision_3y_met"
+                    >
+                    7+ em 3 anos
+                </label>
+            </fieldset>
+
+            <fieldset class="filter-group">
+                <legend>Atropelamentos</legend>
+
+                <label class="filter-option">
+                    <input
+                        type="checkbox"
+                        data-filter-field="pedestrian_1y_met"
+                    >
+                    2+ em 1 ano
+                </label>
+
+                <label class="filter-option">
+                    <input
+                        type="checkbox"
+                        data-filter-field="pedestrian_3y_met"
+                    >
+                    4+ em 3 anos
+                </label>
+            </fieldset>
+            {% endif %}
+
+            {% if import_summary %}
+                <fieldset class="filter-group">
+                    <legend>Marcadores</legend>
+                    <label class="filter-option">
+                        <input
+                            id="signaling-radius-toggle"
+                            type="checkbox"
+                        >
+                        Mostrar raio dos marcadores
+                    </label>
+                </fieldset>
+            {% endif %}
+
+            <p
+                id="filter-counter"
+                class="filter-counter"
+                aria-live="polite"
+            >
+                {% if view_mode == 'individual' %}0 de 0 sinistros exibidos{% else %}0 de 0 locais exibidos{% endif %}
+            </p>
+
+            <button
+                id="clear-filters-button"
+                class="clear-filters-button"
+                type="button"
+            >
+                Limpar filtros
+            </button>
+            {% endif %}
+        </div>
+    </section>
+
+    <button
+        id="open-tools-panel"
+        class="open-tools-panel-button"
+        type="button"
+        aria-label="Abrir painel de ferramentas"
+        aria-controls="tools-panel"
+        aria-expanded="false"
+        title="Abrir ferramentas"
+        hidden
+    >
+        &#9776;
+    </button>
 
     {{ map_data|json_script:"map-data" }}
+    {{ view_mode|json_script:"view-mode" }}
+    {{ available_periods|json_script:"available-periods" }}
+    {{ analysis_id|json_script:"analysis-id" }}
+    {{ signaling_map_data|json_script:"signaling-map-data" }}
+    <div
+        id="signaling-config"
+        data-problems-url-template="{% url 'signaling:point-problems' 0 %}"
+        data-problem-solution-url-template="{% url 'signaling:update-problem-solution' 0 0 %}"
+        data-problem-delete-url-template="{% url 'signaling:delete-point-problem' 0 0 %}"
+        data-create-url="{% url 'signaling:create-point' %}"
+        data-report-url-template="{% url 'signaling:point-report' 0 %}"
+        data-delete-url-template="{% url 'signaling:delete-point' 0 %}"
+        data-update-status-url-template="{% url 'signaling:update-point-status' 0 %}"
+        data-update-search-radius-url-template="{% url 'signaling:update-point-search-radius' 0 %}"
+        data-min-search-radius-meters="{{ min_signaling_search_radius_meters }}"
+        data-max-search-radius-meters="{{ max_signaling_search_radius_meters }}"
+        data-intervention-url-template="{% url 'signaling:save-intervention' 0 %}"
+        data-delete-intervention-url-template="{% url 'signaling:delete-intervention' 0 0 %}"
+        data-update-condition-url-template="{% url 'signaling:update-intervention-condition' 0 0 %}"
+        data-update-notes-url-template="{% url 'signaling:update-intervention-notes' 0 0 %}"
+        data-traffic-light-icon-url="{% static 'icons/signaling/traffic-light.svg' %}"
+        data-adequate-icon-url="{% static 'icons/signaling/adequate-signal-icon.svg' %}"
+        data-inadequate-icon-url="{% static 'icons/signaling/inadequate-signal-icon.svg' %}"
+        data-remove-icon-url="{% static 'icons/signaling/remove-signal-icon.svg' %}"
+        data-delete-icon-url="{% static 'icons/signaling/delete-signal-icon.svg' %}"
+        data-toggle-icon-url="{% static 'icons/signaling/arrow-button.svg' %}"
+        data-notes-icon-url="{% static 'icons/signaling/text-read-icon.svg' %}"
+        data-intervention-icon-base-url="{% static 'icons/signaling/' %}"
+        data-has-individual-analysis="{% if has_individual_analysis %}true{% else %}false{% endif %}"
+        hidden
+    ></div>
 
     <script
-        src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js">
+        src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+        referrerpolicy="origin">
+    </script>
+
+    <script
+        src="{% static 'js/individual_filters.js' %}">
     </script>
 
     <script
         src="{% static 'js/map.js' %}">
+    </script>
+
+    <script src="{% static 'js/intersection_problems.js' %}"></script>
+
+    <script
+        src="{% static 'js/signaling.js' %}">
+    </script>
+
+    <script
+        src="{% static 'js/upload.js' %}">
     </script>
 
 </body>

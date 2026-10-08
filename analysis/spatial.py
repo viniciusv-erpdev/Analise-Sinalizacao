@@ -1,10 +1,33 @@
 import numpy as np
 import pandas as pd
+from math import atan2, cos, radians, sin, sqrt
 
 from sklearn.cluster import DBSCAN
 
 
 EARTH_RADIUS_METERS = 6_371_000
+
+
+def haversine_distance_meters(
+    latitude_a: float,
+    longitude_a: float,
+    latitude_b: float,
+    longitude_b: float,
+) -> float:
+    """Calcula a distância geodésica aproximada entre duas coordenadas."""
+    latitude_delta = radians(latitude_b - latitude_a)
+    longitude_delta = radians(longitude_b - longitude_a)
+    latitude_a_radians = radians(latitude_a)
+    latitude_b_radians = radians(latitude_b)
+
+    haversine = (
+        sin(latitude_delta / 2) ** 2
+        + cos(latitude_a_radians)
+        * cos(latitude_b_radians)
+        * sin(longitude_delta / 2) ** 2
+    )
+    angular_distance = 2 * atan2(sqrt(haversine), sqrt(1 - haversine))
+    return EARTH_RADIUS_METERS * angular_distance
 
 
 def cluster_points(

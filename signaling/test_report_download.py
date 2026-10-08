@@ -1,0 +1,509 @@
+from io import BytesIO
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from unittest.mock import patch
+from zipfile import is_zipfile
+
+from django.core.files.uploadedfile import SimpleUploadedFile
+from django.test import TestCase
+from django.urls import reverse
+from PIL import Image
+from docx import Document
+
+from signaling.services import create_point_problem
+from signaling.intersection_problems import get_problem
+from signaling.report_generator import generate_signaling_report
+
+from signaling.models import SignalingIntervention, SignalingPoint
+from signaling.surveys import ANALYSIS_SESSION_KEY
+
+
+DOCX_CONTENT_TYPE = (
+    "application/vnd.openxmlformats-officedocument."
+    "wordprocessingml.document"
+)
+
+
+class SignalingReportDownloadTests(TestCase):
+    def setUp(self):
+        self.point = SignalingPoint.objects.create(
+            latitude=0,
+            longitude=0,
+            status=SignalingPoint.Status.INCOMPLETE,
+            search_radius_meters=100,
+        )
+        self.url = reverse("signaling:point-report", args=[self.point.id])
+
+    def set_individual_analysis(self, accidents=None):
+        session = self.client.session
+        session[ANALYSIS_SESSION_KEY] = {
+            "analysis_id": "current-analysis",
+            "view_mode": "individual",
+            "map_data": accidents or [],
+            "import_summary": {},
+        }
+        session.save()
+
+    def valid_form_data(self):
+        return {
+            "inspection_address": "Avenida Teste, 100",
+            "occurrence_date": "2026-09-01",
+            "inspection_date": "2026-09-11",
+            "inspector_name": "Responsável Teste",
+        }
+
+    def png_upload(self, name="local.png"):
+        image_buffer = BytesIO()
+        Image.new("RGB", (80, 50), "blue").save(image_buffer, format="PNG")
+        return SimpleUploadedFile(
+            name,
+            image_buffer.getvalue(),
+            content_type="image/png",
+        )
+
+    def response_bytes(self, response):
+        content = b"".join(response.streaming_content)
+        response.close()
+        return content
+
+    def accident_item(
+        self,
+        accident_id,
+        *,
+        latitude=0,
+        year=2025,
+        month=1,
+        category="collision",
+        fatal=False,
+    ):
+        labels = {
+            "collision": "Colisão",
+            "pedestrian": "Atropelamento",
+            "crash": "Choque",
+        }
+        return {
+            "id": accident_id,
+            "latitude": latitude,
+            "longitude": 0,
+            "year": year,
+            "month": month,
+            "is_fatal": fatal,
+            "record_type": (
+                "SINISTRO FATAL" if fatal else "SINISTRO NAO FATAL"
+            ),
+            "date": f"01/{month:02d}/{year}",
+            "accident_type": labels[category],
+            "category": category,
+            "street": "RUA TESTE",
+            "modes": [{"name": "Automóvel", "quantity": 1}],
+        }
+
+    def test_report_without_persisted_problems(self):
+        self.set_individual_analysis()
+        response = self.client.get(self.url)
+        self.assertContains(response, "PROBLEMAS E SOLUÇÕES")
+        self.assertContains(response, "Nenhum problema ou solução cadastrado.")
+        docx_response = self.client.post(self.url, self.valid_form_data())
+        self.assertEqual(docx_response.status_code, 200)
+        document = Document(BytesIO(self.response_bytes(docx_response)))
+        self.assertIn("Nenhum problema ou solução cadastrado.",
+                      [p.text for p in document.paragraphs])
+
+    def test_html_groups_persisted_problems_and_solutions_in_catalog_order(self):
+        self.set_individual_analysis()
+        for entries in [
+            [("P1", ["P1A"])],
+            [("P1", ["P1B", "P1A"])],
+            [("P3", ["P3C"]), ("P1", ["P1B", "P1A"])],
+        ]:
+            with self.subTest(entries=entries):
+                self.point.problems.all().delete()
+                for code, solutions in entries:
+                    create_point_problem(self.point, code, solutions)
+                response = self.client.get(self.url)
+                self.assertEqual(response.status_code, 200)
+                html = response.content.decode()
+                previous = -1
+                for code, solutions in sorted(entries):
+                    definition = get_problem(code)
+                    self.assertContains(response, definition.text, count=1)
+                    position = html.index(definition.text)
+                    self.assertGreater(position, previous)
+                    previous = position
+                    for solution, text in definition.solutions:
+                        if solution in solutions:
+                            self.assertContains(response, text, count=1)
+                            self.assertGreater(html.index(text), previous)
+                            previous = html.index(text)
+
+    def test_word_uses_same_persisted_problems_as_html_and_preserves_interventions(self):
+        self.set_individual_analysis()
+        create_point_problem(self.point, "P3", ["P3C"])
+        create_point_problem(self.point, "P1", ["P1B", "P1A"])
+        SignalingIntervention.objects.create(
+            signaling_point=self.point, type="TRAFFIC_LIGHT",
+            condition="OK", notes="Intervenção preservada",
+        )
+        # Another waypoint must never leak into this report.
+        other = SignalingPoint.objects.create(latitude=1, longitude=1, status="OK")
+        create_point_problem(other, "P2", ["P2A"])
+        html = self.client.get(self.url)
+        self.assertContains(html, "Intervenção preservada")
+        self.assertNotContains(html, get_problem("P2").text)
+        with patch("signaling.views.generate_signaling_report", wraps=generate_signaling_report) as generator:
+            response = self.client.post(self.url, self.valid_form_data())
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(generator.call_args.args[1]["problems"], html.context["survey"]["problems"])
+        document = Document(BytesIO(self.response_bytes(response)))
+        paragraphs = [p.text for p in document.paragraphs]
+        section = paragraphs.index("PROBLEMAS E SOLUÇÕES")
+        self.assertGreater(section, paragraphs.index("Intervenções"))
+        self.assertLess(section, paragraphs.index("Fotos do local"))
+        previous = section
+        for problem in html.context["survey"]["problems"]:
+            self.assertEqual(paragraphs.count(problem["problem_text"]), 1)
+            self.assertGreater(paragraphs.index(problem["problem_text"]), previous)
+            previous = paragraphs.index(problem["problem_text"])
+            for solution in problem["solutions"]:
+                self.assertEqual(paragraphs.count(solution["text"]), 1)
+                self.assertGreater(paragraphs.index(solution["text"]), previous)
+                previous = paragraphs.index(solution["text"])
+        cells = [cell.text for table in document.tables for row in table.rows for cell in row.cells]
+        self.assertIn("Intervenção preservada", cells)
+        self.assertNotIn(get_problem("P2").text, paragraphs)
+        self.assertLess(html.content.decode().index(">Intervenções<"),
+                        html.content.decode().index(">PROBLEMAS E SOLUÇÕES<"))
+
+    def test_get_displays_form_and_automatic_survey_data(self):
+        self.set_individual_analysis()
+
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'name="inspection_address"')
+        self.assertContains(response, 'name="occurrence_date"')
+        self.assertContains(response, 'name="inspection_date"')
+        self.assertContains(response, 'name="inspector_name"')
+        self.assertContains(response, 'name="photos"')
+        self.assertContains(response, 'name="study_reason"')
+        self.assertContains(response, 'name="study_objective"')
+        self.assertContains(response, "multiple")
+        self.assertContains(response, "100 m")
+        self.assertContains(response, "Incompleta")
+        self.assertContains(response, "csrfmiddlewaretoken")
+
+    def test_html_shows_chart_accidents_and_intervention_details(self):
+        self.set_individual_analysis([{
+            "id": "A-1",
+            "latitude": 0,
+            "longitude": 0,
+            "record_type": "SINISTRO NAO FATAL",
+            "date": "11/09/2026",
+            "accident_type": "Colisão",
+            "category": "collision",
+            "street": "RUA TESTE",
+            "modes": [{"name": "Automóvel", "quantity": 1}],
+        }])
+        SignalingIntervention.objects.create(
+            signaling_point=self.point,
+            type=SignalingIntervention.Type.TRAFFIC_LIGHT,
+            condition=SignalingIntervention.Condition.OK,
+            notes="Boa visibilidade",
+        )
+
+        response = self.client.get(self.url)
+
+        self.assertContains(response, "data:image/png;base64,")
+        self.assertContains(response, "Sinistros relacionados")
+        self.assertContains(response, "A-1")
+        self.assertContains(response, "Semáforo")
+        self.assertContains(response, "<strong>Adequada</strong>", html=True)
+        self.assertContains(response, "Adequada")
+        self.assertContains(response, "Boa visibilidade")
+        self.assertContains(response, "icons/signaling/traffic-light.svg")
+
+    @patch("signaling.views.generate_signaling_report")
+    def test_new_fields_are_validated_and_passed_to_generator(self, generator_mock):
+        generator_mock.return_value = BytesIO(b"docx")
+        self.set_individual_analysis()
+        data = self.valid_form_data()
+        data.update({
+            "study_reason": "Motivo temporário",
+            "study_objective": "Objetivo temporário",
+        })
+
+        response = self.client.post(self.url, data)
+
+        self.assertEqual(response.status_code, 200)
+        passed_form_data = generator_mock.call_args.args[2]
+        self.assertEqual(passed_form_data["study_reason"], "Motivo temporário")
+        self.assertEqual(passed_form_data["study_objective"], "Objetivo temporário")
+
+    def test_valid_post_returns_docx_attachment(self):
+        self.set_individual_analysis()
+
+        response = self.client.post(self.url, self.valid_form_data())
+        content = self.response_bytes(response)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], DOCX_CONTENT_TYPE)
+        self.assertIn("attachment", response["Content-Disposition"])
+        self.assertIn(f"relatorio_local_{self.point.id}_", response["Content-Disposition"])
+        self.assertGreater(len(content), 0)
+        self.assertTrue(is_zipfile(BytesIO(content)))
+
+    def test_get_applies_one_collection_to_all_survey_indicators(self):
+        self.set_individual_analysis([
+            self.accident_item("fatal-january", fatal=True),
+            self.accident_item("nonfatal-february", month=2),
+            self.accident_item(
+                "pedestrian-january",
+                category="pedestrian",
+            ),
+            self.accident_item("outside-radius", latitude=0.002),
+        ])
+
+        response = self.client.get(
+            self.url
+            + "?year=2025&month=1&category=collision&gravity=fatal"
+        )
+        survey = response.context["survey"]
+
+        self.assertEqual(survey["total_accidents"], 1)
+        self.assertEqual(survey["summary"]["fatal"], 1)
+        self.assertEqual(survey["summary"]["non_fatal"], 0)
+        self.assertEqual(survey["summary"]["by_type"]["Colisão"], 1)
+        self.assertEqual(
+            [item["id"] for item in survey["accidents"]],
+            ["fatal-january"],
+        )
+        self.assertContains(response, "Anos: 2025. Meses: Janeiro.")
+        self.assertContains(response, "Somente fatais")
+
+    @patch("signaling.views.generate_signaling_report")
+    def test_post_preserves_filters_and_passes_filtered_survey_to_word(
+        self,
+        generator_mock,
+    ):
+        generator_mock.return_value = BytesIO(b"docx")
+        self.set_individual_analysis([
+            self.accident_item("selected", month=2, category="pedestrian"),
+            self.accident_item("hidden", month=1),
+        ])
+
+        response = self.client.post(
+            self.url
+            + "?analysis=current-analysis&year=2025&month=2&"
+            "category=pedestrian&gravity=non_fatal",
+            self.valid_form_data(),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        passed_survey = generator_mock.call_args.args[1]
+        self.assertEqual(
+            [item["id"] for item in passed_survey["accidents"]],
+            ["selected"],
+        )
+        self.assertEqual(passed_survey["total_accidents"], 1)
+        self.assertEqual(
+            passed_survey["filters"]["categories"],
+            "Atropelamento",
+        )
+
+    @patch("signaling.views.generate_signaling_report")
+    def test_html_and_word_preserve_multiple_years_and_months(
+        self,
+        generator_mock,
+    ):
+        generator_mock.return_value = BytesIO(b"docx")
+        self.set_individual_analysis([
+            self.accident_item("jan-2022", year=2022, month=1),
+            self.accident_item("oct-2024", year=2024, month=10),
+            self.accident_item("jun-2026", year=2026, month=6),
+            self.accident_item("feb-2024", year=2024, month=2),
+            self.accident_item(
+                "mar-2022-outside-radius",
+                year=2022,
+                month=3,
+                latitude=0.002,
+            ),
+        ])
+        query = (
+            "?year=2022&year=2024&year=2026&"
+            "month=1&month=3&month=6&month=10"
+        )
+
+        response = self.client.get(self.url + query)
+        self.assertEqual(
+            [item["id"] for item in response.context["survey"]["accidents"]],
+            ["jan-2022", "oct-2024", "jun-2026"],
+        )
+        self.assertContains(response, "Anos: 2022, 2024 e 2026")
+        self.assertContains(response, "Janeiro, Março, Junho e Outubro")
+
+        response = self.client.post(self.url + query, self.valid_form_data())
+        self.assertEqual(response.status_code, 200)
+        passed_survey = generator_mock.call_args.args[1]
+        self.assertEqual(
+            [item["id"] for item in passed_survey["accidents"]],
+            ["jan-2022", "oct-2024", "jun-2026"],
+        )
+
+    @patch("signaling.views.generate_signaling_report")
+    def test_invalid_filters_do_not_render_or_generate_report(
+        self,
+        generator_mock,
+    ):
+        self.set_individual_analysis([self.accident_item("current")])
+
+        response = self.client.post(
+            self.url + "?year=1999",
+            self.valid_form_data(),
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertContains(
+            response,
+            "Um ou mais anos informados não pertencem à análise atual.",
+            status_code=400,
+        )
+        generator_mock.assert_not_called()
+
+    def test_filters_from_a_previous_upload_are_rejected(self):
+        self.set_individual_analysis([self.accident_item("current")])
+
+        response = self.client.get(self.url + "?analysis=previous-analysis")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertContains(
+            response,
+            "Os filtros informados pertencem a outra análise.",
+            status_code=400,
+        )
+
+    def test_valid_filters_with_no_matches_generate_zero_report(self):
+        self.set_individual_analysis([
+            self.accident_item("fatal", fatal=True),
+            self.accident_item("nonfatal", fatal=False),
+        ])
+
+        response = self.client.get(
+            self.url + "?year=2025&category=pedestrian"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["survey"]["total_accidents"], 0)
+
+    def test_missing_required_fields_renders_form_errors(self):
+        self.set_individual_analysis()
+
+        response = self.client.post(self.url, {"occurrence_date": "2026-09-01"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"].split(";")[0], "text/html")
+        self.assertFormError(response.context["form"], "inspection_address", "Este campo é obrigatório.")
+        self.assertFormError(response.context["form"], "inspection_date", "Este campo é obrigatório.")
+        self.assertFormError(response.context["form"], "inspector_name", "Este campo é obrigatório.")
+
+    def test_valid_png_photo_generates_docx(self):
+        self.set_individual_analysis()
+        data = self.valid_form_data()
+        data["photos"] = self.png_upload()
+
+        response = self.client.post(self.url, data)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], DOCX_CONTENT_TYPE)
+        self.assertTrue(is_zipfile(BytesIO(self.response_bytes(response))))
+
+    def test_invalid_photo_format_renders_form_error(self):
+        self.set_individual_analysis()
+        data = self.valid_form_data()
+        data["photos"] = SimpleUploadedFile(
+            "not-image.txt",
+            b"invalid",
+            content_type="text/plain",
+        )
+
+        response = self.client.post(self.url, data)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFormError(
+            response.context["form"],
+            "photos",
+            "Envie somente fotos nos formatos JPEG ou PNG.",
+        )
+
+    def test_more_than_ten_photos_renders_form_error(self):
+        self.set_individual_analysis()
+        data = self.valid_form_data()
+        data["photos"] = [self.png_upload(f"photo-{index}.png") for index in range(11)]
+
+        response = self.client.post(self.url, data)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFormError(
+            response.context["form"],
+            "photos",
+            "Envie no máximo 10 fotos.",
+        )
+
+    def test_post_without_individual_analysis_does_not_generate_docx(self):
+        response = self.client.post(self.url, self.valid_form_data())
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"].split(";")[0], "text/html")
+        self.assertContains(
+            response,
+            "Não há uma análise de sinistros individuais disponível",
+        )
+
+    def test_valid_empty_analysis_generates_zero_accident_report(self):
+        self.set_individual_analysis([])
+
+        response = self.client.post(self.url, self.valid_form_data())
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], DOCX_CONTENT_TYPE)
+        self.assertTrue(is_zipfile(BytesIO(self.response_bytes(response))))
+
+    def test_generation_does_not_persist_data_or_files(self):
+        self.set_individual_analysis([])
+        intervention = SignalingIntervention.objects.create(
+            signaling_point=self.point,
+            type=SignalingIntervention.Type.TRAFFIC_LIGHT,
+            condition=SignalingIntervention.Condition.OK,
+            notes="Original",
+        )
+        original_point = (
+            self.point.status,
+            self.point.search_radius_meters,
+            self.point.updated_at,
+        )
+        original_counts = (
+            SignalingPoint.objects.count(),
+            SignalingIntervention.objects.count(),
+        )
+
+        with TemporaryDirectory() as media_root, self.settings(MEDIA_ROOT=media_root):
+            data = self.valid_form_data()
+            data["photos"] = self.png_upload()
+            response = self.client.post(self.url, data)
+            self.response_bytes(response)
+            self.assertEqual(list(Path(media_root).iterdir()), [])
+
+        self.point.refresh_from_db()
+        intervention.refresh_from_db()
+        self.assertEqual(
+            (SignalingPoint.objects.count(), SignalingIntervention.objects.count()),
+            original_counts,
+        )
+        self.assertEqual(
+            (
+                self.point.status,
+                self.point.search_radius_meters,
+                self.point.updated_at,
+            ),
+            original_point,
+        )
+        self.assertEqual(intervention.notes, "Original")

@@ -1,0 +1,11 @@
+<div data-pgt-editor data-max-items="{{ widget.max_items }}" data-max-length="{{ widget.max_length }}">
+    <div class="d-grid gap-2 mb-2" data-pgt-rows>
+        {% for value in widget.value %}
+            <div class="input-group" data-pgt-row>
+                <textarea class="form-control" rows="1" name="{{ widget.name }}" maxlength="{{ widget.max_length }}" aria-label="Polo Gerador de Tráfego">{{ value }}</textarea>
+                <button class="btn btn-outline-danger" type="button" data-pgt-remove aria-label="Remover local">Remover</button>
+            </div>
+        {% endfor %}
+    </div>
+    <button class="btn btn-outline-secondary btn-sm" type="button" data-pgt-add>+ Adicionar local manualmente</button>
+</div>

@@ -46,7 +46,10 @@ def build_occurrence_points(
                 "collisions",
                 "pedestrians",
             ]
-        )
+        ).astype({
+            "latitude": df["latitude"].dtype,
+            "longitude": df["longitude"].dtype,
+        })
 
     result = (
         df

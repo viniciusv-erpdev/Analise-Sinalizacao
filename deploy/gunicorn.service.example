@@ -1,0 +1,21 @@
+# Template Ubuntu: substitua todos os placeholders antes de instalar.
+[Unit]
+Description=Gunicorn para a aplicacao Django
+After=network.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=<APP_USER>
+WorkingDirectory=<PROJECT_PATH>
+EnvironmentFile=<ENV_FILE_PATH>
+ExecStart=<VENV_PATH>/bin/gunicorn --workers 1 --worker-class sync --bind 127.0.0.1:8000 --access-logfile - --error-logfile - config.wsgi:application
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=45
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
