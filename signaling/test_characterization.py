@@ -72,7 +72,7 @@ class CharacterizationReportTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.streaming)
         content = BytesIO(b"".join(response.streaming_content))
-        response.close()
+        self.assertTrue(response.closed)
         self.assertTrue(is_zipfile(content))
         with ZipFile(content) as archive:
             for name in archive.namelist():
