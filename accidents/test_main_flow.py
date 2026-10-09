@@ -141,10 +141,8 @@ class MainFlowFixtures:
         self.assertEqual(response["Content-Type"],
                          "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
         self.assertIn("attachment", response["Content-Disposition"])
-        try:
-            content = BytesIO(b"".join(response.streaming_content))
-        finally:
-            response.close()
+        content = BytesIO(b"".join(response.streaming_content))
+        self.assertTrue(response.closed)
         with ZipFile(content) as archive:
             for name in archive.namelist():
                 if name.endswith((".xml", ".rels")):
