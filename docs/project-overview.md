@@ -121,3 +121,5 @@ Esse estado é usado para manter a análise atual sem persistir o payload bruto 
 - [reference/databases.md](reference/databases.md)
 
 Documentos históricos e de auditoria ficam em [history/](history/).
+
+Teste de integração da pipeline de CI/CD.
