@@ -142,3 +142,17 @@ permanece público com HTTP 200, mas isso não valida login nem permissões.
 Reverter somente o código para uma versão anterior pode reabrir os endpoints:
 em falha, restringir o acesso operacionalmente e corrigir com uma revisão compatível;
 não desfazer migrations nem restaurar banco sobre gravações novas automaticamente.
+
+
+## Núcleo de reservas (etapa 2B)
+
+Modelo, protocolo, contratos e limites estão em
+[waypoint-reservations.md](waypoint-reservations.md).
+A existência desse núcleo não aplica reservas às views nem ao Admin.
+
+
+## Integração obrigatória (etapa 3A)
+
+As operações exclusivas agora exigem reserva no backend. O Admin de sinalização
+é somente leitura. Contratos HTTP, erros, snapshot/fencing de relatórios e
+dependências da interface 3B: [waypoint-reservation-api.md](waypoint-reservation-api.md).

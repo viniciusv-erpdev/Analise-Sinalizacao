@@ -175,34 +175,37 @@ async function postJson(url, body = {}) {
 
 async function requestSignalingJson(url, options = {}) {
     const response = await fetch(url, options);
+    // Authentication errors must remain readable even if a server returns HTML.
+    if (response.status === 401) {
+        document.querySelectorAll("[data-signaling-auth-notice]").forEach((notice) => {
+            notice.hidden = false;
+        });
+        throw new Error("Sua sessão expirou ou você não entrou. Use Entrar para continuar.");
+    }
+    const forbiddenMessage = "A requisição foi recusada (403). Recarregue a página " +
+        "e verifique sua sessão e permissões.";
     const contentType = response.headers.get("Content-Type") || "";
     if (!contentType.toLowerCase().includes("application/json")) {
-        const responseBody = await response.text();
+        // Do not log response bodies: HTML debug pages can contain sensitive data.
         console.error("Resposta não JSON da API de sinalização", {
             status: response.status,
             url: response.url,
             contentType,
-            bodyStart: responseBody.slice(0, 200),
         });
-        throw new Error(
-            "O servidor retornou uma resposta inesperada. Tente novamente."
-        );
+        throw new Error(response.status === 403 ? forbiddenMessage :
+            "O servidor retornou uma resposta inesperada. Tente novamente.");
     }
 
     let data;
     try {
         data = await response.json();
     } catch {
-        throw new Error("O servidor retornou uma resposta inválida. Tente novamente.");
+        throw new Error(response.status === 403 ? forbiddenMessage :
+            "O servidor retornou uma resposta inválida. Tente novamente.");
     }
     if (!data || typeof data !== "object") {
-        throw new Error("O servidor retornou uma resposta inválida. Tente novamente.");
-    }
-    if (response.status === 401) {
-        document.querySelectorAll("[data-signaling-auth-notice]").forEach((notice) => {
-            notice.hidden = false;
-        });
-        throw new Error("Sua sessão expirou ou você não entrou. Use Entrar para continuar.");
+        throw new Error(response.status === 403 ? forbiddenMessage :
+            "O servidor retornou uma resposta inválida. Tente novamente.");
     }
     if (response.status === 403 && data.code === "csrf_failed") {
         throw new Error("A sessão ou o formulário expirou. Recarregue a página antes de tentar novamente.");

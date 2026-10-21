@@ -1,3 +1,4 @@
+from signaling.test_support import ReservationClient, ReservationFunctionalTestMixin
 from signaling.test_support import authorize
 from unittest.mock import patch
 
@@ -9,13 +10,15 @@ from signaling.models import SignalingIntervention, SignalingPoint
 from signaling.overpass import OverpassUnavailable, PGT_SEARCH_ERROR
 
 
-class PGTEndpointTests(TestCase):
+class PGTEndpointTests(ReservationFunctionalTestMixin, TestCase):
     def setUp(self):
+        super().setUp()
         authorize(self.client, ("view_signalingpoint", "generate_signaling_report"))
         self.point = SignalingPoint.objects.create(
             latitude="-21.170123", longitude="-47.810456",
             status="OK", search_radius_meters=120,
         )
+        self.client.reserve(self.point.pk)
         self.url = reverse("signaling:search-point-pgts", args=[self.point.pk])
         self.search = patch("signaling.views.find_nearby_pgts", return_value=["🏥 Unidade de Saúde: Hospital X"]).start()
         self.addCleanup(patch.stopall)
@@ -42,7 +45,8 @@ class PGTEndpointTests(TestCase):
 
     def test_requires_post_and_csrf(self):
         self.assertEqual(self.client.get(self.url).status_code, 405)
-        csrf_client = Client(enforce_csrf_checks=True)
+        self.client.release(self.point.pk)
+        csrf_client = ReservationClient(enforce_csrf_checks=True)
         authorize(csrf_client, ("view_signalingpoint", "generate_signaling_report"))
         self.assertEqual(csrf_client.post(self.url).status_code, 403)
         report_url = reverse("signaling:point-report", args=[self.point.pk])

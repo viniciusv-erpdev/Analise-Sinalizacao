@@ -659,3 +659,32 @@ test("read-only waypoint popup disables mutations and cannot open creation", () 
     assert.equal(shell.querySelector("[data-search-radius]").disabled, true);
     vm.runInContext("openCreationPopup(0, 0)", context);
 });
+
+
+test("hidden CSRF input remains the fallback when the cookie is unavailable", () => {
+    const context = signalingContext(async () => {});
+    context.document.cookie = "";
+    assert.equal(vm.runInContext("getCsrfToken()", context), "csrf-test");
+    context.document.querySelector = () => null;
+    assert.equal(vm.runInContext("getCsrfToken()", context), "");
+});
+
+test("creation security errors remain understandable without JSON and never replay writes", async () => {
+    for (const [status, contentType, body, expected] of [
+        [401, "text/html", null, /Entre|Entrar/],
+        [403, "text/html", null, /403.*Recarregue/],
+        [403, "application/json", {code: "csrf_failed"}, /formulário expirou/],
+        [403, "application/json", {code: "permission_denied", error: "Sem permissão para criar"}, /Sem permissão/],
+        [403, "application/json", {code: "permission_denied"}, /Você não tem permissão/],
+        [401, "application/json", {code: "authentication_required"}, /Entrar/],
+    ]) {
+        let calls = 0;
+        const context = signalingContext(async () => {
+            calls++;
+            return {status, ok: false, headers: {get: () => contentType},
+                json: async () => body, text: async () => "<html>Forbidden</html>"};
+        });
+        await assert.rejects(vm.runInContext('postJson("/signaling/points/", {})', context), expected);
+        assert.equal(calls, 1);
+    }
+});

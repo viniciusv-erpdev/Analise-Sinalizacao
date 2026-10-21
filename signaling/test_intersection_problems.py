@@ -1,3 +1,4 @@
+from signaling.test_support import ReservationClient, ReservationFunctionalTestMixin
 from signaling.test_support import authorize, authorized_client
 """Contrato persistente dos problemas: catálogo, ORM e API, sem interface."""
 import json
@@ -252,10 +253,12 @@ class PointProblemTests(TestCase):
         self.assertEqual(list(record.solutions.values_list("solution_code", flat=True)), ["P3A", "P3B"])
 
 
-class PointProblemAPITests(TestCase):
+class PointProblemAPITests(ReservationFunctionalTestMixin, TestCase):
     def setUp(self):
+        super().setUp()
         authorize(self.client, ("view_signalingpoint", "change_signalingpoint"))
         self.point = make_point()
+        self.client.reserve(self.point.pk)
         self.url = reverse("signaling:point-problems", args=[self.point.pk])
 
     def post(self, payload, url=None, client=None):
@@ -442,7 +445,8 @@ class PointProblemAPITests(TestCase):
         self.assertEqual(self.client.put(self.url).status_code, 405)
 
     def test_shared_access_and_csrf_protection_for_all_writes(self):
-        client = Client(enforce_csrf_checks=True)
+        self.client.release(self.point.pk)
+        client = ReservationClient(enforce_csrf_checks=True)
         authorize(client, ("view_signalingpoint", "change_signalingpoint"))
         self.assertEqual(client.get(self.url).status_code, 200)
         payload = {"problem_code": "P1", "solution_codes": ["P1A"]}
@@ -463,6 +467,7 @@ class PointProblemAPITests(TestCase):
 
     def test_existing_waypoint_delete_cascades(self):
         self.create()
+        self.client.release(self.point.pk)
         authorize(self.client, ("view_signalingpoint", "delete_signalingpoint"))
         response = self.post({}, reverse("signaling:delete-point", args=[self.point.pk]))
         self.assertEqual(response.status_code, 200)

@@ -37,6 +37,7 @@ def build_signaling_survey(
 def build_signaling_survey_from_items(
     signaling_point: SignalingPoint,
     accidents: list[dict[str, object]],
+    *, point_items=None,
 ) -> dict[str, object]:
     """Monta sob demanda um levantamento a partir do payload individual enxuto."""
     nearby_accidents = []
@@ -70,6 +71,29 @@ def build_signaling_survey_from_items(
         elif item["record_type"] == "SINISTRO NAO FATAL":
             non_fatal_count += 1
 
+    point_items = point_items if point_items is not None else capture_point_items(signaling_point)
+
+    return {
+        "signaling_point_id": signaling_point.id,
+        "radius_meters": radius_meters,
+        "status": {
+            "value": signaling_point.status,
+            "label": POINT_STATUS_LABELS[signaling_point.status],
+        },
+        "total_accidents": len(nearby_accidents),
+        "summary": {
+            "fatal": fatal_count,
+            "non_fatal": non_fatal_count,
+            "by_type": accidents_by_type,
+        },
+        "interventions": point_items["interventions"],
+        "problems": point_items["problems"],
+        "accidents": nearby_accidents,
+    }
+
+
+def capture_point_items(signaling_point):
+    """Materialize persisted fields for report processing without later ORM reads."""
     interventions = [
         {
             "id": intervention.id,
@@ -85,22 +109,9 @@ def build_signaling_survey_from_items(
     ]
 
     return {
-        "signaling_point_id": signaling_point.id,
-        "radius_meters": radius_meters,
-        "status": {
-            "value": signaling_point.status,
-            "label": POINT_STATUS_LABELS[signaling_point.status],
-        },
-        "total_accidents": len(nearby_accidents),
-        "summary": {
-            "fatal": fatal_count,
-            "non_fatal": non_fatal_count,
-            "by_type": accidents_by_type,
-        },
         "interventions": interventions,
         "problems": [
             serialize_point_problem(problem)
             for problem in signaling_point.problems.prefetch_related("solutions")
         ],
-        "accidents": nearby_accidents,
     }

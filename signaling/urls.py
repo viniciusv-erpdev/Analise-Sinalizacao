@@ -1,11 +1,15 @@
 from django.urls import path
 
-from signaling import views
+from signaling import views, reservation_views
 
 
 app_name = "signaling"
 
 urlpatterns = [
+    path("points/<int:point_id>/reservation/", reservation_views.status, name="reservation-status"),
+    path("points/<int:point_id>/reservation/acquire/", reservation_views.acquire, name="acquire-reservation"),
+    path("points/<int:point_id>/reservation/renew/", reservation_views.renew, name="renew-reservation"),
+    path("points/<int:point_id>/reservation/release/", reservation_views.release, name="release-reservation"),
     path("points/<int:point_id>/problems/", views.point_problems, name="point-problems"),
     path(
         "points/<int:point_id>/problems/<int:problem_id>/solution/",

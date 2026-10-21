@@ -73,10 +73,14 @@ class AuthorizationTests(TestCase):
         self.assertEqual(self.intervention.notes, "PROTECTED-NOTES")
 
     def test_each_api_accepts_only_its_minimum_operation_permissions(self):
-        with patch("signaling.views.find_nearby_pgts", return_value=[]):
+        from signaling.test_support import ReservationClient
+        from django.db import connection
+        from contextlib import nullcontext
+        guard = patch("signaling.reservations._require_locking_backend") if connection.vendor == "sqlite" else nullcontext()
+        with guard, patch("signaling.views.find_nearby_pgts", return_value=[]):
             for name, args, data, operation in self.operations():
                 with self.subTest(endpoint=name), transaction.atomic():
-                    client = Client()
+                    client = ReservationClient()
                     user = authorize(client, ("view_signalingpoint", operation))
                     self.assertFalse(user.is_staff)
                     self.assertFalse(user.is_superuser)
@@ -122,7 +126,7 @@ class AuthorizationTests(TestCase):
         self.assertEqual(self.client.get(url).status_code, 403)
         self.client.logout()
         authorize(self.client, ("view_signalingpoint", "generate_signaling_report"))
-        self.assertEqual(self.client.get(url).status_code, 404)
+        self.assertEqual(self.client.get(url).status_code, 428)
 
     def test_authenticated_api_csrf_is_still_required(self):
         client = Client(enforce_csrf_checks=True)
@@ -134,7 +138,8 @@ class AuthorizationTests(TestCase):
         client.get("/")
         response = client.post(url, '{"status":"ABSENT"}', content_type="application/json",
                                HTTP_X_CSRFTOKEN=client.cookies["csrftoken"].value)
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, 428)
+        self.assertEqual(response.json()["code"], "reservation_required")
 
     def test_expired_session_gets_json_401(self):
         authorize(self.client, ("view_signalingpoint",))
@@ -257,6 +262,105 @@ class AdminAuthorizationTests(TestCase):
         request = RequestFactory().get("/")
         request.user = user
         self.assertTrue(model_admin.has_view_permission(request, self.intervention))
-        self.assertTrue(model_admin.has_add_permission(request))
-        self.assertTrue(model_admin.has_change_permission(request, self.intervention))
-        self.assertTrue(model_admin.has_delete_permission(request, self.intervention))
+        self.assertFalse(model_admin.has_add_permission(request))
+        self.assertFalse(model_admin.has_change_permission(request, self.intervention))
+        self.assertFalse(model_admin.has_delete_permission(request, self.intervention))
+
+
+class WaypointCreationSecurityTests(TestCase):
+    payload = {"latitude": -21.17, "longitude": -47.81, "status": "OK"}
+
+    def csrf(self, client):
+        client.get("/")
+        return client.cookies["csrftoken"].value
+
+    def create(self, client, token=None, **headers):
+        if token is not None:
+            headers["HTTP_X_CSRFTOKEN"] = token
+        return client.post(reverse("signaling:create-point"),
+                           json.dumps(self.payload), content_type="application/json", **headers)
+
+    def test_creation_permission_matrix_with_real_csrf(self):
+        for permissions, status, code in [
+            (None, 401, "authentication_required"),
+            ((), 403, "permission_denied"),
+            (("view_signalingpoint",), 403, "permission_denied"),
+            (("add_signalingpoint",), 403, "permission_denied"),
+            (("view_signalingpoint", "add_signalingpoint"), 201, None),
+        ]:
+            with self.subTest(permissions=permissions):
+                client = Client(enforce_csrf_checks=True)
+                if permissions is not None:
+                    user = authorize(client, permissions)
+                    self.assertFalse(user.is_staff)
+                    self.assertFalse(user.is_superuser)
+                before = SignalingPoint.objects.count()
+                response = self.create(client, self.csrf(client))
+                self.assertEqual(response.status_code, status)
+                self.assertEqual(response["Content-Type"], "application/json")
+                if code:
+                    self.assertEqual(response.json()["code"], code)
+                    self.assertEqual(SignalingPoint.objects.count(), before)
+                else:
+                    self.assertTrue(SignalingPoint.objects.filter(pk=response.json()["id"]).exists())
+                    self.assertEqual(SignalingPoint.objects.count(), before + 1)
+
+    def test_missing_invalid_cookie_and_untrusted_origin_remain_forbidden(self):
+        client = Client(enforce_csrf_checks=True)
+        authorize(client, ("view_signalingpoint", "add_signalingpoint"))
+        token = self.csrf(client)
+        for bad_token in [None, "invalid", "a" * 32]:
+            with self.subTest(token_present=bad_token is not None):
+                response = self.create(client, bad_token)
+                self.assertEqual(response.status_code, 403)
+                self.assertEqual(response.json()["code"], "csrf_failed")
+        response = self.create(client, token, HTTP_ORIGIN="https://untrusted.example")
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json()["code"], "csrf_failed")
+        del client.cookies["csrftoken"]
+        self.assertEqual(self.create(client, token).json()["code"], "csrf_failed")
+        self.assertFalse(SignalingPoint.objects.exists())
+
+    def test_old_dom_token_after_login_is_rejected_but_current_cookie_succeeds(self):
+        client = Client(enforce_csrf_checks=True)
+        user = authorize(client, ("view_signalingpoint", "add_signalingpoint"))
+        user.set_password("Only-for-test-login-5813")
+        user.save()
+        client.force_login(user)
+        response = client.get("/")
+        import re
+        old_dom_token = re.search(r'name="csrfmiddlewaretoken" value="([^"]+)"',
+                                  response.content.decode()).group(1)
+        old_cookie = client.cookies["csrftoken"].value
+        response = client.post(reverse("login"), {
+            "username": user.get_username(), "password": "Only-for-test-login-5813",
+        }, HTTP_X_CSRFTOKEN=old_dom_token)
+        self.assertEqual(response.status_code, 302)
+        current_cookie = client.cookies["csrftoken"].value
+        self.assertNotEqual(current_cookie, old_cookie)
+        response = self.create(client, old_dom_token)
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json()["code"], "csrf_failed")
+        self.assertEqual(self.create(client, current_cookie).status_code, 201)
+
+    def test_creation_never_enters_reservation_services_on_sqlite(self):
+        client = Client(enforce_csrf_checks=True)
+        authorize(client, ("view_signalingpoint", "add_signalingpoint"))
+        token = self.csrf(client)
+        with patch("signaling.reservations._require_locking_backend",
+                   side_effect=AssertionError("Reservation locking must not be invoked")) as locking:
+            with patch("signaling.reservations._authenticated_user",
+                       side_effect=AssertionError("Reservation identity must not be invoked")) as identity:
+                self.assertEqual(self.create(client, token).status_code, 201)
+            identity.assert_not_called()
+        locking.assert_not_called()
+
+    def test_expired_session_with_valid_csrf_requires_login_without_writing(self):
+        client = Client(enforce_csrf_checks=True)
+        authorize(client, ("view_signalingpoint", "add_signalingpoint"))
+        token = self.csrf(client)
+        client.session.flush()
+        response = self.create(client, token)
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.json()["code"], "authentication_required")
+        self.assertFalse(SignalingPoint.objects.exists())

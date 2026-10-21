@@ -1,3 +1,4 @@
+from signaling.test_support import ReservationClient, ReservationFunctionalTestMixin
 from signaling.test_support import authorize
 from math import degrees
 
@@ -216,8 +217,9 @@ class SignalingSurveyTests(TestCase):
         self.assertEqual(second_survey["total_accidents"], 1)
 
 
-class SignalingReportTests(TestCase):
+class SignalingReportTests(ReservationFunctionalTestMixin, TestCase):
     def setUp(self):
+        super().setUp()
         authorize(self.client, ("view_signalingpoint", "generate_signaling_report"))
 
     def accident_item(self, latitude: float = 0, longitude: float = 0):

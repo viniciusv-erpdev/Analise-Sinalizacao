@@ -1,3 +1,4 @@
+from signaling.test_support import ReservationClient, ReservationFunctionalTestMixin
 from signaling.test_support import authorize
 from io import BytesIO
 from unittest.mock import patch
@@ -52,12 +53,14 @@ class CharacterizationFormTests(SimpleTestCase):
             PGTListField().clean(["Escola\x0bX"])
 
 
-class CharacterizationReportTests(TestCase):
+class CharacterizationReportTests(ReservationFunctionalTestMixin, TestCase):
     def setUp(self):
+        super().setUp()
         authorize(self.client, ("view_signalingpoint", "generate_signaling_report"))
         self.point = SignalingPoint.objects.create(
             latitude=-21.17, longitude=-47.81, status="OK", search_radius_meters=100,
         )
+        self.client.reserve(self.point.pk)
         self.url = reverse("signaling:point-report", args=[self.point.pk])
         session = self.client.session
         session[ANALYSIS_SESSION_KEY] = {"view_mode": "individual", "map_data": [], "analysis_id": "current"}
