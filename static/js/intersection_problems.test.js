@@ -1,4 +1,7 @@
 "use strict";
+require("./waypoint_reservations.test.js");
+require("./waypoint_reservation_ui.test.js");
+require("./waypoint_sync.test.js");
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
@@ -459,13 +462,28 @@ function signalingContext(fetch, capabilities = {}) {
         },
         querySelector: () => ({value: "csrf-test"}),
         querySelectorAll: () => [],
+        addEventListener() {},
         createElement: (tag) => new Element(tag),
     };
     const map = {createPane() {}, getPane: () => ({style: {}}), on() {}};
     const L = {layerGroup: () => ({addTo() { return this; }}),
         DomEvent: {disableClickPropagation() {}, disableScrollPropagation() {}, stopPropagation() {}}};
     const context = vm.createContext({
-        document, map, L, fetch, Element, window: {},
+        document, map, L, fetch, Element, window: {addEventListener() {}},
+        WaypointSync: {create(options) {
+            document.syncOptions = options;
+            return {track() {},start() {},stop() {},refresh() {},beginWrite() {},endWrite() {}};
+        }},
+        WaypointReservations: {create: () => ({
+            canOperate: () => true, close() {}, perform: async (_id,url,options) => {
+                const response = await fetch(url,options); return response.json();
+            },
+        })},
+        WaypointReservationUI: {create: () => ({
+            bind() {}, notify() {}, confirm: async () => true,
+            isOpen: id => document.openPointId === id,
+            invalidate(id) { document.invalidatedPointId = id; },
+        })},
         console: {error() {}}, escapeHtml: (text) => text,
     });
     vm.runInContext(signalingSource, context);
@@ -687,4 +705,39 @@ test("creation security errors remain understandable without JSON and never repl
         await assert.rejects(vm.runInContext('postJson("/signaling/points/", {})', context), expected);
         assert.equal(calls, 1);
     }
+});
+
+test("real Leaflet adapter adds and updates remote points by ID without opening or duplicating popups",()=>{
+    const context=signalingContext(async()=>{}, {canView:"true"});
+    let created=0;
+    context.L.divIcon=options=>options;
+    context.L.marker=(coords,options)=>{
+        created++;
+        return {coords,options,open:false,handlers:{},
+            bindPopup(content){this.content=content;},on(event,fn){this.handlers[event]=fn;},
+            addTo(){},isPopupOpen(){return this.open;},closePopup(){this.open=false;},
+            setLatLng(value){this.coords=value;},setIcon(value){this.options.icon=value;},
+            setPopupContent(value){this.content=value;}};
+    };
+    context.L.circle=()=>({addTo(){},setLatLng(){},setRadius(){}});
+    const removed=[];
+    context.removed=removed;
+    vm.runInContext("signalingLayer.removeLayer = marker => removed.push(marker); signalingRadiusLayer.removeLayer = () => {}",context);
+    const options=context.document.syncOptions;
+    const first={id:101,latitude:0,longitude:0,status:"OK",search_radius_meters:50,interventions:[]};
+    options.apply(first);
+    options.apply({...first,status:"ABSENT"});
+    assert.equal(created,1);
+    assert.equal(vm.runInContext("signalingMarkers.size",context),1);
+    assert.equal(vm.runInContext("signalingPoints.get(101).status",context),"ABSENT");
+    assert.equal(vm.runInContext("signalingMarkers.get(101).open",context),false);
+    context.document.openPointId=101;
+    first.draft="unsaved";
+    assert.equal(options.apply({...first,status:"INCOMPLETE"}),false);
+    assert.equal(vm.runInContext("signalingPoints.get(101).draft",context),"unsaved");
+    assert.equal(vm.runInContext("signalingPoints.get(101).status",context),"ABSENT");
+    options.remove(101);
+    assert.equal(context.document.invalidatedPointId,101);
+    assert.equal(vm.runInContext("signalingMarkers.size",context),0);
+    assert.equal(removed.length,1);
 });

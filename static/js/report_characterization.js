@@ -87,7 +87,9 @@
             const controller = new AbortController();
             const timeout = setTimeout(() => controller.abort(), 20000);
             try {
-                const response = await fetch(section.dataset.pgtSearchUrl, {
+                const request = document.defaultView?.waypointReservationRequest;
+                if (!request) throw new Error("Abra o relatório pelo waypoint reservado no mapa.");
+                const response = await request(section.dataset.pgtSearchUrl, {
                     method: "POST",
                     headers: {
                         "X-CSRFToken": section.closest("form")
@@ -134,7 +136,7 @@
                         : "Os locais encontrados já estão na lista.");
                 }
             } catch (error) {
-                notify(searchError, true);
+                notify(typeof error.code === "string" || error.message?.startsWith("Abra o relatório") ? error.message : searchError, true);
             } finally {
                 clearTimeout(timeout);
                 searching = false;

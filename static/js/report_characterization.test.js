@@ -48,7 +48,8 @@ class Element {
 }
 
 function page() {
-    const document = {createElement: (tag) => new Element(tag), querySelectorAll: () => []};
+    const document = {createElement: (tag) => new Element(tag), querySelectorAll: () => [],
+        defaultView: {waypointReservationRequest: (...args) => fetch(...args)}};
     const form = new Element("form");
     form.ownerDocument = document;
     const csrf = new Element("input");
@@ -241,3 +242,20 @@ for (const status of [401, 403]) {
         assert.equal(ui.search.disabled, false);
     });
 }
+
+test("PGT cannot use an unreserved raw fetch when the report bridge is missing",async(t)=>{
+    const fetch=mockSearch(t,[]);
+    const ui=page();delete ui.section.ownerDocument.defaultView.waypointReservationRequest;
+    await ui.search.click();
+    assert.equal(fetch.mock.callCount(),0);
+    assert.match(ui.notice.textContent,/waypoint reservado/);
+});
+test("PGT bridge preserves reservation-specific errors without removing manual entries",async()=>{
+    const ui=page();ui.add.click();ui.inputs()[0].value="Manual";
+    ui.section.ownerDocument.defaultView.waypointReservationRequest=async()=>{
+        throw Object.assign(new Error("A reserva expirou. Inicie uma nova interação."),{code:"reservation_expired"});
+    };
+    await ui.search.click();
+    assert.match(ui.notice.textContent,/reserva expirou/);
+    assert.deepEqual(ui.values(),["Manual"]);
+});

@@ -1788,6 +1788,12 @@
     {{ signaling_map_data|json_script:"signaling-map-data" }}
     <div
         id="signaling-config"
+        data-sync-url="{% url 'signaling:synchronize-points' %}"
+        data-can-view="{% if perms.signaling.view_signalingpoint %}true{% else %}false{% endif %}"
+        data-reservation-acquire-url-template="{% url 'signaling:acquire-reservation' 0 %}"
+        data-reservation-renew-url-template="{% url 'signaling:renew-reservation' 0 %}"
+        data-reservation-release-url-template="{% url 'signaling:release-reservation' 0 %}"
+        data-reservation-status-url-template="{% url 'signaling:reservation-status' 0 %}"
         data-can-add="{% if perms.signaling.view_signalingpoint and perms.signaling.add_signalingpoint %}true{% else %}false{% endif %}"
         data-can-change="{% if perms.signaling.view_signalingpoint and perms.signaling.change_signalingpoint %}true{% else %}false{% endif %}"
         data-can-delete="{% if perms.signaling.view_signalingpoint and perms.signaling.delete_signalingpoint %}true{% else %}false{% endif %}"
@@ -1831,6 +1837,9 @@
         src="{% static 'js/map.js' %}">
     </script>
 
+    <script src="{% static 'js/waypoint_sync.js' %}"></script>
+    <script src="{% static 'js/waypoint_reservations.js' %}"></script>
+    <script src="{% static 'js/waypoint_reservation_ui.js' %}"></script>
     <script src="{% static 'js/intersection_problems.js' %}"></script>
 
     <script

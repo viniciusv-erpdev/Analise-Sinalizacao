@@ -91,7 +91,7 @@
                 </p>
             </div>
         {% else %}
-            <form method="post" enctype="multipart/form-data" novalidate>
+            <form method="post" enctype="multipart/form-data" data-waypoint-report-form novalidate>
                 {% csrf_token %}
                 {% if form.non_field_errors %}
                     <div class="alert alert-danger" role="alert">

@@ -155,11 +155,14 @@
                     record.solutions.forEach((solution) => list.append(element("li", solution.text)));
                     row.append(list);
                     const controls = element("div", "", "d-flex gap-2");
-                    controls.append(button("Alterar", () => open({
+                    const edit = button("Alterar", () => open({
                         ...options, container: null, editingProblemId: record.id,
-                    })));
-                    controls.append(button("Excluir", () => remove(record),
-                        "btn btn-outline-danger btn-sm"));
+                    }));
+                    edit.dataset.editProblem = "";
+                    const removeButton = button("Excluir", () => remove(record),
+                        "btn btn-outline-danger btn-sm");
+                    removeButton.dataset.deleteProblem = "";
+                    controls.append(edit, removeButton);
                     if (options.canChange !== false) row.append(controls);
                     records.append(row);
                 });
@@ -173,6 +176,7 @@
                     .find((node) => node.dataset.choice === focused && !node.disabled)?.focus();
             }
             marker.getPopup().update();
+            options.onRender?.();
         }
         async function load() {
             if (!current()) return;
@@ -255,12 +259,14 @@
             }
         }
         async function remove(record) {
-            if (busy || !current() || !confirm("Excluir este problema e suas soluções selecionadas?")) return;
+            if (busy || !current() || (options.canEdit && !options.canEdit())) return;
             busy = true;
             busyLabel = "Excluindo...";
             notify("");
             render();
             try {
+                if (!(await confirm("Excluir este problema e suas soluções selecionadas?"))) return;
+                if (!current() || (options.canEdit && !options.canEdit())) return;
                 const response = await postJson(url(urls.delete, record.id));
                 if (!current()) return;
                 if (response.success !== true || response.deleted !== true || response.id !== record.id) {

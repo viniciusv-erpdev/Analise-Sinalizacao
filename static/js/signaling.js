@@ -17,6 +17,7 @@ const maxSignalingSearchRadiusMeters = Number(
 );
 const signalingLayer = L.layerGroup().addTo(map);
 const signalingMarkers = new Map();
+const signalingPoints = new Map();
 const signalingRadiusCircles = new Map();
 map.createPane("signalingRadiusPane");
 map.getPane("signalingRadiusPane").style.zIndex = "390";
@@ -154,6 +155,9 @@ const signalingConditions = {
 
 
 function getCsrfToken() {
+    const cookie = (document.cookie || "").split(";").map(value => value.trim())
+        .find(value => value.startsWith("csrftoken="));
+    if (cookie) return decodeURIComponent(cookie.slice("csrftoken=".length));
     const tokenInput = document.querySelector(
         "[name=csrfmiddlewaretoken]"
     );
@@ -162,18 +166,22 @@ function getCsrfToken() {
 
 
 async function postJson(url, body = {}) {
-    return requestSignalingJson(url, {
-        method: "POST",
-        headers: {
-            "Content-Type": "application/json",
-            "X-CSRFToken": getCsrfToken(),
-        },
-        body: JSON.stringify(body),
-    });
+    waypointSync?.beginWrite();
+    try {
+        return await requestSignalingJson(url, {
+            method: "POST",
+            headers: {"Content-Type": "application/json", "X-CSRFToken": getCsrfToken()},
+            body: JSON.stringify(body),
+        });
+    } finally { waypointSync?.endWrite(); }
 }
 
 
 async function requestSignalingJson(url, options = {}) {
+    const protectedPoint = url.match(/\/signaling\/points\/(\d+)\//);
+    if (protectedPoint && (options.method || "GET") !== "GET") {
+        return waypointReservations.perform(Number(protectedPoint[1]), url, options);
+    }
     const response = await fetch(url, options);
     // Authentication errors must remain readable even if a server returns HTML.
     if (response.status === 401) {
@@ -683,6 +691,7 @@ function buildInterventionForm(point) {
 
 
 function showPointPopup(marker, point) {
+    if (marker.isPopupOpen && !marker.isPopupOpen()) return;
     // Leaflet update() reparses string content; keep the live DOM and its handlers.
     const content = document.createElement("div");
     content.innerHTML = buildExistingPointPopup(point);
@@ -694,8 +703,10 @@ function showPointPopup(marker, point) {
     const statusEditor = popupElement.querySelector("[data-status-editor]");
     const reportLink = popupElement.querySelector("[data-generate-report]");
     if (reportLink) {
-        reportLink.addEventListener("click", () => {
-            reportLink.href = reportUrl(point.id);
+        reportLink.addEventListener("click", async (event) => {
+            event.preventDefault();
+            try { await reservationUI.openReport(point.id, reportUrl(point.id)); }
+            catch (error) { showSignalingFeedback(error.message); }
         });
     }
     const searchRadiusInput = popupElement.querySelector("[data-search-radius]");
@@ -753,7 +764,7 @@ function showPointPopup(marker, point) {
                 showPointPopup(marker, point);
             } catch (error) {
                 button.disabled = false;
-                window.alert(error.message);
+                showSignalingFeedback(error.message);
             }
         });
     });
@@ -768,8 +779,10 @@ function showPointPopup(marker, point) {
         },
         getJson: requestSignalingJson,
         postJson,
-        onBack: () => showPointPopup(marker, point),
-        confirm: (message) => window.confirm(message),
+        canEdit: () => waypointReservations.canOperate(point.id),
+        onRender: () => reservationUI.bind(marker, point),
+        onBack: () => { waypointReservations.close(); showPointPopup(marker, point); },
+        confirm: (message) => reservationUI.confirm(message),
     };
     IntersectionProblems.open({
         ...problemOptions, container: popupElement.querySelector("[data-point-problems]"),
@@ -803,7 +816,7 @@ function showPointPopup(marker, point) {
                     showPointPopup(marker, point);
                 } catch (error) {
                     button.disabled = false;
-                    window.alert(error.message);
+                    showSignalingFeedback(error.message);
                 }
             });
         });
@@ -828,7 +841,7 @@ function showPointPopup(marker, point) {
                     showPointPopup(marker, point);
                 } catch (error) {
                     button.disabled = false;
-                    window.alert(error.message);
+                    showSignalingFeedback(error.message);
                 }
             });
         });
@@ -898,6 +911,7 @@ function showPointPopup(marker, point) {
 
     popupElement.querySelector("[data-cancel-notes]")
         .addEventListener("click", (event) => {
+            waypointReservations.close();
             L.DomEvent.stopPropagation(event);
             const interventionId = Number(notesPanel.dataset.interventionId);
             const intervention = point.interventions.find(
@@ -955,7 +969,7 @@ function showPointPopup(marker, point) {
     );
     deleteButton.addEventListener("click", async (event) => {
         L.DomEvent.stopPropagation(event);
-        const confirmed = window.confirm(
+        const confirmed = await reservationUI.confirm(
             "Excluir este ponto?\n\n" +
             "Todas as sinalizações cadastradas neste local " +
             "também serão removidas."
@@ -969,6 +983,7 @@ function showPointPopup(marker, point) {
             await postJson(deleteUrl(point.id));
             signalingLayer.removeLayer(marker);
             signalingMarkers.delete(point.id);
+            signalingPoints.delete(point.id);
             const radiusCircle = signalingRadiusCircles.get(point.id);
             if (radiusCircle) {
                 signalingRadiusLayer.removeLayer(radiusCircle);
@@ -977,7 +992,7 @@ function showPointPopup(marker, point) {
             map.closePopup();
         } catch (error) {
             deleteButton.disabled = false;
-            window.alert(error.message);
+            showSignalingFeedback(error.message);
         }
     });
     if (!canChangeSignaling) {
@@ -991,6 +1006,7 @@ function showPointPopup(marker, point) {
         deleteButton.hidden = true;
         deleteButton.disabled = true;
     }
+    reservationUI.bind(marker, point);
     if (!canReportSignaling) {
         popupElement.querySelectorAll("[data-generate-report]").forEach((control) => {
             control.hidden = true;
@@ -1001,6 +1017,7 @@ function showPointPopup(marker, point) {
 
 function wireInterventionForm(marker, point) {
     if (!canChangeSignaling) return;
+    reservationUI.bind(marker, point);
     const popupElement = marker.getPopup().getElement();
     const form = popupElement.querySelector(".signaling-intervention-form");
     const typeInput = form.elements.type;
@@ -1081,12 +1098,14 @@ function wireInterventionForm(marker, point) {
 
     form.querySelector("[data-cancel-intervention]")
         .addEventListener("click", (event) => {
+            waypointReservations.close();
             L.DomEvent.stopPropagation(event);
             showPointPopup(marker, point);
         });
 
     form.querySelector("[data-back-to-signaling]")
         .addEventListener("click", (event) => {
+            waypointReservations.close();
             L.DomEvent.stopPropagation(event);
             showPointPopup(marker, point);
         });
@@ -1117,20 +1136,42 @@ function wireInterventionForm(marker, point) {
             resetFormSelection();
         } catch (error) {
             updateSubmitState();
-            window.alert(error.message);
+            showSignalingFeedback(error.message);
         }
     });
 }
 
 
+const waypointReservations = WaypointReservations.create({
+    fetch: (...args) => fetch(...args), csrf: getCsrfToken,
+    uuid: () => crypto.randomUUID(),
+    url: (id, operation) => signalingConfig.dataset[
+        "reservation" + operation[0].toUpperCase() + operation.slice(1) + "UrlTemplate"
+    ].replace("/0/", "/" + id + "/"),
+});
+const reservationUI = WaypointReservationUI.create({
+    manager: waypointReservations, document, window, map,
+    markers: signalingMarkers, canChange: canChangeSignaling,
+    canDelete: canDeleteSignaling, canReport: canReportSignaling,
+    render: showPointPopup,
+});
+function showSignalingFeedback(message) { reservationUI.notify(message); }
+
 function addSignalingMarker(point) {
+    if (signalingMarkers.has(point.id)) return;
+    signalingPoints.set(point.id,point);
+    waypointSync?.track(point.id);
     const marker = L.marker([point.latitude, point.longitude], {
         icon: createSignalingIcon(point.status),
     });
 
     point.interventions = point.interventions || [];
     marker.bindPopup(buildExistingPointPopup(point), {maxWidth: 390});
-    marker.on("popupopen", () => showPointPopup(marker, point));
+    marker.on("popupopen", () => {
+        showPointPopup(marker, point);
+        reservationUI.begin(marker, point);
+    });
+    marker.on("popupclose", () => reservationUI.end(point.id));
 
     marker.addTo(signalingLayer);
     signalingMarkers.set(point.id, marker);
@@ -1224,14 +1265,62 @@ function openCreationPopup(latitude, longitude) {
                     buttons.forEach((item) => {
                         item.disabled = false;
                     });
-                    window.alert(error.message);
+                    showSignalingFeedback(error.message);
                 }
             }, {once: true});
         });
 }
 
 
+const waypointSync = signalingConfig.dataset.canView === "true" ? WaypointSync.create({
+    fetch: (...args) => fetch(...args),
+    url: signalingConfig.dataset.syncUrl,
+    csrf: getCsrfToken,
+    ids: signalingData.map(point => point.id),
+    hidden: () => document.hidden,
+    apply(point) {
+        const marker = signalingMarkers.get(point.id);
+        if (!marker) { addSignalingMarker(point); return true; }
+        if (reservationUI.isOpen(point.id) || marker.isPopupOpen()) return false;
+        Object.assign(signalingPoints.get(point.id),point);
+        marker.setLatLng([point.latitude,point.longitude]);
+        marker.setIcon(createSignalingIcon(point.status));
+        marker.setPopupContent(buildExistingPointPopup(point));
+        const circle = signalingRadiusCircles.get(point.id);
+        circle?.setLatLng([point.latitude,point.longitude]);
+        circle?.setRadius(point.search_radius_meters);
+        return true;
+    },
+    remove(id) {
+        const marker = signalingMarkers.get(id);
+        if (!marker) return;
+        if (reservationUI.isOpen(id) || marker.isPopupOpen()) reservationUI.invalidate(id);
+        marker.closePopup();
+        signalingLayer.removeLayer(marker);
+        signalingMarkers.delete(id); signalingPoints.delete(id);
+        const circle = signalingRadiusCircles.get(id);
+        if (circle) signalingRadiusLayer.removeLayer(circle);
+        signalingRadiusCircles.delete(id);
+    },
+    onError(error) {
+        showSignalingFeedback(error.status ? error.message :
+            "Não foi possível atualizar o mapa. Os marcadores atuais foram mantidos.");
+    },
+}) : null;
+
 signalingData.forEach(addSignalingMarker);
+if (waypointSync) {
+    // Reinitialization of this module must not leave a second polling loop alive.
+    window.waypointSyncController?.stop();
+    window.waypointSyncController = waypointSync;
+    waypointSync.start();
+    document.addEventListener("visibilitychange", () => {
+        if (!document.hidden) waypointSync.refresh();
+    });
+    window.addEventListener("pagehide", () => waypointSync.stop());
+    window.addEventListener("pageshow", () => waypointSync.start());
+}
+
 
 if (signalingRadiusToggle) {
     signalingRadiusToggle.addEventListener("change", () => {
