@@ -1,3 +1,4 @@
+from signaling.test_support import authorize
 from io import BytesIO
 from unittest.mock import patch
 from xml.etree import ElementTree
@@ -53,6 +54,7 @@ class CharacterizationFormTests(SimpleTestCase):
 
 class CharacterizationReportTests(TestCase):
     def setUp(self):
+        authorize(self.client, ("view_signalingpoint", "generate_signaling_report"))
         self.point = SignalingPoint.objects.create(
             latitude=-21.17, longitude=-47.81, status="OK", search_radius_meters=100,
         )

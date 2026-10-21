@@ -61,6 +61,7 @@ class Element {
     get innerHTML() { return this._html || ""; }
     focus() { if (this.ownerDocument) this.ownerDocument.activeElement = this; }
     matches(selector) {
+        if (selector.includes(",")) return selector.split(",").some((part) => this.matches(part.trim()));
         if (selector.startsWith(".")) return this.className.split(" ").includes(selector.slice(1));
         if (selector.startsWith("[data-")) {
             const key = selector.slice(6, -1).replace(/-([a-z])/g, (_, c) => c.toUpperCase());
@@ -98,7 +99,7 @@ const urls = {
     delete: "/signaling/points/0/problems/0/delete/",
 };
 
-function screen({saved = [], get, post, confirmation = true, id = 202, main = false} = {}) {
+function screen({saved = [], get, post, confirmation = true, id = 202, main = false, canChange = true} = {}) {
     let persisted = [...saved], nextId = 100, ready;
     const document = {createElement: (tag) => new Element(tag, document)};
     const outside = new Element(), escaped = [], calls = [];
@@ -119,7 +120,7 @@ function screen({saved = [], get, post, confirmation = true, id = 202, main = fa
     });
     outside.addEventListener("wheel", () => escaped.push("wheel"));
     const args = {
-        document, marker, point: {id}, urls,
+        document, marker, point: {id}, urls, canChange,
         leaflet: {DomEvent: {
             stopPropagation: (event) => event.stopPropagation(),
             disableClickPropagation: (node) => {
@@ -442,8 +443,9 @@ test("backend texts are text content, not injected HTML", async () => {
     assert.equal(s.rows()[0].querySelectorAll("img").length, 0);
 });
 
-function signalingContext(fetch) {
+function signalingContext(fetch, capabilities = {}) {
     const config = {dataset: {
+        canAdd: "true", canChange: "true", canDelete: "true", canReport: "true", ...capabilities,
         problemsUrlTemplate: urls.collection, problemSolutionUrlTemplate: urls.solution,
         problemDeleteUrlTemplate: urls.delete, hasIndividualAnalysis: "false",
         minSearchRadiusMeters: "10", maxSearchRadiusMeters: "300",
@@ -456,6 +458,7 @@ function signalingContext(fetch) {
             return null;
         },
         querySelector: () => ({value: "csrf-test"}),
+        querySelectorAll: () => [],
         createElement: (tag) => new Element(tag),
     };
     const map = {createPane() {}, getPane: () => ({style: {}}), on() {}};
@@ -613,4 +616,46 @@ test("showPointPopup survives Leaflet content updates through loading GET and su
     assert.notEqual(current, first);
     assert.match(current.textContent, /Nenhum problema cadastrado/);
     assert.equal(current.querySelectorAll("[data-record-id]").length, 0);
+});
+
+
+test("API authorization errors distinguish session expiry and missing permission", async () => {
+    for (const status of [401, 403]) {
+        const context = signalingContext(async () => ({
+            status, ok: false, headers: {get: () => "application/json"},
+            json: async () => ({success: false, error: "Sem permissão"}),
+        }));
+        await assert.rejects(vm.runInContext('requestSignalingJson("/problems/")', context),
+            status === 401 ? /sessão expirou/ : /Sem permissão/);
+    }
+});
+
+
+test("view-only problems show saved data without edit or delete controls", async () => {
+    const s = screen({main: true, saved: [record()], canChange: false});
+    await s.ready;
+    assert.equal(s.rows().length, 1);
+    assert.equal(s.rows()[0].querySelectorAll("button").length, 0);
+    assert.equal(s.calls.filter((call) => call.method === "POST").length, 0);
+});
+
+
+test("read-only waypoint popup disables mutations and cannot open creation", () => {
+    const context = signalingContext(async () => { throw new Error("unexpected request"); },
+        {canAdd: "false", canChange: "false", canDelete: "false", canReport: "false"});
+    context.IntersectionProblems = {open() {}};
+    const shell = new Element("div");
+    const marker = {getPopup: () => ({getElement: () => shell}),
+        setPopupContent(content) { shell.replaceChildren(content); }};
+    context.marker = marker;
+    context.point = {id: 202, status: "OK", search_radius_meters: 50, interventions: []};
+    vm.runInContext("showPointPopup(marker, point)", context);
+    for (const selector of ["[data-edit-point-status]", "[data-add-intervention]",
+        "[data-add-problems]", "[data-edit-notes]", ".signaling-popup__delete"]) {
+        const control = shell.querySelector(selector);
+        assert.equal(control.hidden, true, selector);
+        assert.equal(control.disabled, true, selector);
+    }
+    assert.equal(shell.querySelector("[data-search-radius]").disabled, true);
+    vm.runInContext("openCreationPopup(0, 0)", context);
 });

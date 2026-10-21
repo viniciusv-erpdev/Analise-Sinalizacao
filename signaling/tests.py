@@ -1,3 +1,4 @@
+from signaling.test_support import authorize
 from decimal import Decimal
 import json
 
@@ -184,6 +185,7 @@ class SignalingInterventionTests(TestCase):
 
 class SignalingPointEndpointTests(TestCase):
     def setUp(self):
+        authorize(self.client)
         self.create_url = reverse("signaling:create-point")
 
     def create_point(self) -> SignalingPoint:
@@ -455,6 +457,7 @@ class SignalingPointEndpointTests(TestCase):
 
 class SignalingInterventionEndpointTests(TestCase):
     def setUp(self):
+        authorize(self.client)
         self.point = SignalingPoint.objects.create(
             latitude=Decimal("-21.170000"),
             longitude=Decimal("-47.810000"),

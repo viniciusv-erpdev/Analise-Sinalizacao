@@ -160,7 +160,7 @@
                     })));
                     controls.append(button("Excluir", () => remove(record),
                         "btn btn-outline-danger btn-sm"));
-                    row.append(controls);
+                    if (options.canChange !== false) row.append(controls);
                     records.append(row);
                 });
                 root.append(records);

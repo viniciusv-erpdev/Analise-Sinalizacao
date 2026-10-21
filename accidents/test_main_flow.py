@@ -1,3 +1,4 @@
+from signaling.test_support import authorize
 """Integrações HTTP com CSVs sintéticos e processamento/relatório reais.
 
 Somente o HTTP externo do Overpass é mockado. O polígono municipal versionado,
@@ -231,6 +232,7 @@ class UploadFlowTests(MainFlowFixtures, TestCase):
 
 class ReportFlowTests(MainFlowFixtures, TestCase):
     def setUp(self):
+        authorize(self.client)
         super().setUp()
         self.upload(individual_files())
         self.point_id = self.create_point()

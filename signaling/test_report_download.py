@@ -1,3 +1,4 @@
+from signaling.test_support import authorize
 from io import BytesIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -26,6 +27,7 @@ DOCX_CONTENT_TYPE = (
 
 class SignalingReportDownloadTests(TestCase):
     def setUp(self):
+        authorize(self.client, ("view_signalingpoint", "generate_signaling_report"))
         self.point = SignalingPoint.objects.create(
             latitude=0,
             longitude=0,

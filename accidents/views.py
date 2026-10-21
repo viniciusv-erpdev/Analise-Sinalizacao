@@ -18,6 +18,7 @@ from signaling.models import (
     MIN_SIGNALING_SEARCH_RADIUS_METERS,
 )
 from signaling.services import get_signaling_map_data
+from signaling.authorization import VIEW
 from signaling.surveys import ANALYSIS_SESSION_KEY
 
 
@@ -118,7 +119,9 @@ def analysis_view(request):
     context = {
         "results": results,
         "map_data": map_data,
-        "signaling_map_data": get_signaling_map_data(),
+        "signaling_map_data": (
+            get_signaling_map_data() if request.user.has_perm(VIEW) else []
+        ),
         "import_error": import_error,
         "import_summary": import_summary,
         "available_periods": available_periods,

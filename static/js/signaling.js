@@ -2,6 +2,10 @@ const signalingData = JSON.parse(
     document.getElementById("signaling-map-data").textContent
 );
 const signalingConfig = document.getElementById("signaling-config");
+const canAddSignaling = signalingConfig.dataset.canAdd === "true";
+const canChangeSignaling = signalingConfig.dataset.canChange === "true";
+const canDeleteSignaling = signalingConfig.dataset.canDelete === "true";
+const canReportSignaling = signalingConfig.dataset.canReport === "true";
 const hasIndividualAnalysis = (
     signalingConfig.dataset.hasIndividualAnalysis === "true"
 );
@@ -193,6 +197,18 @@ async function requestSignalingJson(url, options = {}) {
     }
     if (!data || typeof data !== "object") {
         throw new Error("O servidor retornou uma resposta inválida. Tente novamente.");
+    }
+    if (response.status === 401) {
+        document.querySelectorAll("[data-signaling-auth-notice]").forEach((notice) => {
+            notice.hidden = false;
+        });
+        throw new Error("Sua sessão expirou ou você não entrou. Use Entrar para continuar.");
+    }
+    if (response.status === 403 && data.code === "csrf_failed") {
+        throw new Error("A sessão ou o formulário expirou. Recarregue a página antes de tentar novamente.");
+    }
+    if (response.status === 403) {
+        throw new Error(data.error || "Você não tem permissão para esta operação.");
     }
     if (!response.ok) {
         const validationMessage = data.errors
@@ -391,7 +407,7 @@ function buildInterventionList(point) {
 
 
 function buildExistingPointPopup(point) {
-    const surveyAvailable = hasIndividualAnalysis;
+    const surveyAvailable = hasIndividualAnalysis && canReportSignaling;
     const statusOptions = Object.entries(signalingStatuses)
         .map(([status, config]) => `
             <button
@@ -740,6 +756,7 @@ function showPointPopup(marker, point) {
     });
 
     const problemOptions = {
+        canChange: canChangeSignaling,
         marker, point, document, leaflet: L,
         urls: {
             collection: signalingConfig.dataset.problemsUrlTemplate,
@@ -832,7 +849,7 @@ function showPointPopup(marker, point) {
         notesTitle.textContent = "Observações";
         notesReadView.hidden = false;
         notesEditForm.hidden = true;
-        editNotesButton.hidden = false;
+        editNotesButton.hidden = !canChangeSignaling;
         notesError.hidden = true;
         notesError.textContent = "";
     }
@@ -960,10 +977,27 @@ function showPointPopup(marker, point) {
             window.alert(error.message);
         }
     });
+    if (!canChangeSignaling) {
+        popupElement.querySelectorAll(
+            "[data-edit-point-status], [data-add-intervention], [data-add-problems], " +
+            "[data-remove-intervention], [data-toggle-intervention], [data-edit-notes]"
+        ).forEach((control) => { control.hidden = true; control.disabled = true; });
+        searchRadiusInput.disabled = true;
+    }
+    if (!canDeleteSignaling) {
+        deleteButton.hidden = true;
+        deleteButton.disabled = true;
+    }
+    if (!canReportSignaling) {
+        popupElement.querySelectorAll("[data-generate-report]").forEach((control) => {
+            control.hidden = true;
+        });
+    }
 }
 
 
 function wireInterventionForm(marker, point) {
+    if (!canChangeSignaling) return;
     const popupElement = marker.getPopup().getElement();
     const form = popupElement.querySelector(".signaling-intervention-form");
     const typeInput = form.elements.type;
@@ -1148,6 +1182,7 @@ function buildCreationPopup() {
 
 
 function openCreationPopup(latitude, longitude) {
+    if (!canAddSignaling) return;
     const popup = L.popup()
         .setLatLng([latitude, longitude])
         .setContent(buildCreationPopup())

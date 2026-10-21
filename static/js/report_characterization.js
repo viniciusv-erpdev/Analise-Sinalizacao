@@ -95,6 +95,17 @@
                     },
                     signal: controller.signal,
                 });
+                if (response.status === 401) {
+                    document.querySelectorAll("[data-signaling-auth-notice]").forEach((notice) => {
+                        notice.hidden = false;
+                    });
+                    notify("Sua sessão expirou. Entre novamente para consultar PGTs.", true);
+                    return;
+                }
+                if (response.status === 403) {
+                    notify("Você não tem permissão para consultar PGTs.", true);
+                    return;
+                }
                 const data = await response.json();
                 if (!response.ok || data.success !== true || !Array.isArray(data.results)
                     || !data.results.every((value) => typeof value === "string"

@@ -1,3 +1,4 @@
+from signaling.test_support import authorize
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
@@ -10,6 +11,7 @@ from signaling.overpass import OverpassUnavailable, PGT_SEARCH_ERROR
 
 class PGTEndpointTests(TestCase):
     def setUp(self):
+        authorize(self.client, ("view_signalingpoint", "generate_signaling_report"))
         self.point = SignalingPoint.objects.create(
             latitude="-21.170123", longitude="-47.810456",
             status="OK", search_radius_meters=120,
@@ -18,7 +20,7 @@ class PGTEndpointTests(TestCase):
         self.search = patch("signaling.views.find_nearby_pgts", return_value=["🏥 Unidade de Saúde: Hospital X"]).start()
         self.addCleanup(patch.stopall)
 
-    def test_public_access_matches_current_report_and_ignores_client_coordinates(self):
+    def test_authorized_access_ignores_client_coordinates(self):
         response = self.client.post(self.url, {
             "latitude": 80, "longitude": 90, "radius_meters": 99999,
             "year": 2020, "gravity": "fatal",
@@ -33,14 +35,15 @@ class PGTEndpointTests(TestCase):
             radius_meters=120,
         )
 
-    def test_authenticated_user_has_same_access(self):
+    def test_authenticated_user_without_report_permission_is_denied(self):
         user = get_user_model().objects.create_user(username="report-user")
         self.client.force_login(user)
-        self.assertEqual(self.client.post(self.url).status_code, 200)
+        self.assertEqual(self.client.post(self.url).status_code, 403)
 
     def test_requires_post_and_csrf(self):
         self.assertEqual(self.client.get(self.url).status_code, 405)
         csrf_client = Client(enforce_csrf_checks=True)
+        authorize(csrf_client, ("view_signalingpoint", "generate_signaling_report"))
         self.assertEqual(csrf_client.post(self.url).status_code, 403)
         report_url = reverse("signaling:point-report", args=[self.point.pk])
         from signaling.surveys import ANALYSIS_SESSION_KEY

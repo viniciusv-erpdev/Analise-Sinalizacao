@@ -36,6 +36,9 @@ class SignalingPoint(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
+    class Meta:
+        permissions = [("generate_signaling_report", "Pode gerar relatórios de sinalização")]
+
     def __str__(self) -> str:
         return f"Ponto {self.pk} ({self.latitude}, {self.longitude})"
 

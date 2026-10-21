@@ -48,7 +48,7 @@ class Element {
 }
 
 function page() {
-    const document = {createElement: (tag) => new Element(tag)};
+    const document = {createElement: (tag) => new Element(tag), querySelectorAll: () => []};
     const form = new Element("form");
     form.ownerDocument = document;
     const csrf = new Element("input");
@@ -227,3 +227,17 @@ test("timeout do navegador restaura botão e preserva preenchimento", async (t) 
     assert.deepEqual(ui.values(), ["Manual preservado"]);
     assert.match(ui.notice.textContent, /adicionar.*manualmente/);
 });
+
+
+for (const status of [401, 403]) {
+    test("PGT authorization " + status + " preserves manual inputs", async (t) => {
+        t.mock.method(global, "fetch", async () => ({status, ok: false,
+            json: async () => ({success: false})}));
+        const ui = page();
+        ui.add.click();
+        ui.inputs()[0].value = "Local manual";
+        await ui.search.click();
+        assert.deepEqual(ui.values(), ["Local manual"]);
+        assert.equal(ui.search.disabled, false);
+    });
+}
