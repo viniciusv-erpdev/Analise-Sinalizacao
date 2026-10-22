@@ -58,10 +58,10 @@ test("only one request runs and obsolete response cannot overwrite a newer local
 });
 test("background polling is reduced and return requests fresh data immediately",async()=>{
     const s=setup();s.hidden=true;s.sync.start();await tick();assert.equal(s.calls.length,0);
-    assert.equal([...s.timers.values()][0].ms,60000);
+    assert.equal([...s.timers.values()][0].ms,18000);
     s.hidden=false;s.data=packet([item(1)]);await s.sync.refresh();
     assert.equal(s.nodes.has(1),true);
-    assert.equal([...s.timers.values()][0].ms,10000);
+    assert.equal([...s.timers.values()][0].ms,3000);
 });
 test("start is idempotent and stopped responses never update markers",async()=>{
     const s=setup();s.delay=true;s.sync.start();s.sync.start();await tick();

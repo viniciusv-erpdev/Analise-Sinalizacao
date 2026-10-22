@@ -213,3 +213,128 @@ test("remote deletion during pending work discards its result without releasing 
     const count=backend.calls.length;c.manager.invalidate(7);body.resolve("old result");
     await rejected;assert.equal(backend.calls.length,count);
 });
+
+test("late unproved status during acquisition must not invalidate the newly acquired lease",async()=>{
+    const backend=server(),original=backend.fetch,grant=deferred(),status=deferred(),statusRead=deferred();
+    backend.fetch=async(url,options)=>{
+        const result=await original(url,options);
+        if(url.endsWith("/acquire/"))await grant.promise;
+        if(url.endsWith("/status/")){statusRead.resolve();await status.promise;}
+        return result;
+    };
+    const c=client(backend);
+    const acquiring=c.manager.acquire(7);await tick();
+    const oldStatus=c.manager.status(7);await statusRead.promise;
+    grant.resolve();await acquiring;
+    status.resolve();await oldStatus;
+    assert.equal(c.manager.canOperate(7),true);
+    assert.equal(c.manager.snapshot().state,"active");
+    assert.equal(backend.calls.filter(call=>call.url.endsWith("/release/")).length,0);
+});
+
+test("status responses out of order cannot replace a newer authoritative result",async()=>{
+    const backend=server(),original=backend.fetch,wait=deferred();
+    let delay=true;
+    backend.fetch=async(url,options)=>{
+        const result=await original(url,options);
+        if(url.endsWith("/status/")&&delay){delay=false;await wait.promise;}
+        return result;
+    };
+    const c=client(backend);await c.manager.acquire(7);
+    const old=c.manager.status(7);await tick();
+    backend.expire();
+    await c.manager.status(7);assert.equal(c.manager.snapshot().state,"lost");
+    wait.resolve();
+    assert.equal((await old).stale,true);
+    assert.equal(c.manager.snapshot().state,"lost");
+});
+test("status preceding renewal confirmation is ignored without losing valid ownership",async()=>{
+    const backend=server(),original=backend.fetch,wait=deferred();
+    backend.fetch=async(url,options)=>{
+        const result=await original(url,options);
+        if(url.endsWith("/status/"))await wait.promise;
+        return result;
+    };
+    const c=client(backend);await c.manager.acquire(7);
+    const old=c.manager.status(7);await tick();await c.manager.renew();
+    wait.resolve();assert.equal((await old).stale,true);
+    assert.equal(c.manager.canOperate(7),true);
+});
+test("repeated own status reads neither acquire nor release nor change the proof",async()=>{
+    const backend=server(),c=client(backend);await c.manager.acquire(7);
+    for(let i=0;i<12;i++)assert.equal((await c.manager.status(7)).state,"reserved_self");
+    assert.equal(c.manager.canOperate(7),true);
+    await c.manager.perform(7,"/edit/",{method:"POST"});
+    assert.equal(backend.calls.filter(call=>call.url.endsWith("/acquire/")).length,1);
+    assert.equal(backend.calls.filter(call=>call.url.endsWith("/release/")).length,0);
+});
+test("stale status errors cannot suspend a later acquisition of the same waypoint",async()=>{
+    const backend=server(),original=backend.fetch,wait=deferred();
+    let fail=true;
+    backend.fetch=async(url,options)=>{
+        if(url.endsWith("/status/")&&fail){fail=false;await wait.promise;throw new TypeError("offline");}
+        return original(url,options);
+    };
+    const c=client(backend);await c.manager.acquire(7);
+    const old=c.manager.status(7);await tick();await c.manager.close();await c.manager.acquire(7);
+    wait.resolve();assert.equal((await old).stale,true);
+    assert.equal(c.manager.canOperate(7),true);
+});
+
+test("bfcache return retries an unconfirmed authorized release before a fresh acquisition",async()=>{
+    const backend=server(),c=client(backend);await c.manager.acquire(7);
+    backend.badRelease=true;c.manager.leave();await tick();
+    assert.equal(c.manager.canOperate(7),false);assert.ok(backend.held);
+    backend.badRelease=false;await c.manager.resume();
+    assert.equal(backend.held===null,true);
+    await c.manager.acquire(7);
+    assert.equal(backend.held.generation,2);
+});
+
+test("fresh acquisition waits for the previous navigation release to finish",async()=>{
+    const backend=server(),original=backend.fetch,releaseGate=deferred();
+    backend.fetch=async(url,options)=>{
+        if(url.endsWith("/release/"))await releaseGate.promise;
+        return original(url,options);
+    };
+    const c=client(backend);await c.manager.acquire(7);
+    c.manager.leave();const opening=c.manager.acquire(7);await tick();
+    assert.equal(backend.calls.filter(call=>call.url.endsWith("/acquire/")).length,1);
+    releaseGate.resolve();await opening;
+    assert.equal(c.manager.canOperate(7),true);
+    assert.equal(backend.held.generation,2);
+});
+test("navigation during a slow report retains its lease until work drains",async()=>{
+    const backend=server(),c=client(backend),body=deferred(),started=deferred();
+    await c.manager.acquire(7);
+    const work=c.manager.perform(7,"/points/7/report/",{},async()=>{started.resolve();return body.promise;});
+    const rejected=assert.rejects(work,{code:"superseded"});await started.promise;
+    c.manager.leave();await c.manager.resume();
+    assert.equal(backend.calls.some(call=>call.url.endsWith("/release/")),false);
+    assert.equal(c.manager.canOperate(7),false);
+    body.resolve("discarded");await rejected;assert.equal(backend.held===null,true);
+});
+for(const identity of ["same-user-new-tab","different-user-new-browser"]){
+    test("report keeps exclusive ownership against "+identity,async()=>{
+        const backend=server(),owner=client(backend,"owner"),other=client(backend,identity);
+        await owner.manager.acquire(7);
+        for(const method of ["GET","POST"]){
+            await owner.manager.perform(7,"/points/7/report/",{method},async()=>"report result");
+            await assert.rejects(other.manager.perform(7,"/points/7/report/"),{code:"reservation_required"});
+            await assert.rejects(other.manager.acquire(7),{code:"reservation_occupied"});
+            assert.equal(owner.manager.canOperate(7),true);
+        }
+        assert.equal(backend.calls.filter(call=>call.url.endsWith("/release/")).length,0);
+        await owner.manager.close();await other.manager.acquire(7);
+        assert.equal(other.manager.canOperate(7),true);
+    });
+}
+test("BFCache recovery must not release another interaction's newer acquisition",async()=>{
+    const backend=server(),old=client(backend,"old"),next=client(backend,"new");
+    await old.manager.acquire(7);backend.badRelease=true;old.manager.leave();await tick();
+    backend.expire();backend.badRelease=false;await next.manager.acquire(7);
+    await old.manager.resume();
+    assert.equal(next.manager.canOperate(7),true);
+    assert.equal((await next.manager.status(7)).state,"reserved_self");
+    await assert.rejects(old.manager.acquire(7),{code:"reservation_occupied"});
+});

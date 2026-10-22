@@ -33,6 +33,7 @@
         const listeners = new Set();
         let active = null, intent = 0;
         const entries = new Set();
+        const statusRequests = new Map();
         function snapshot(entry = active) {
             return entry ? {pointId: entry.id, state: entry.state, busy: entry.busy,
                 expiresAt: entry.expiresAt, message: entry.message || "", code: entry.code, closing: entry.closing}
@@ -115,6 +116,7 @@
                     const data = await send(entry, "renew");
                     if (data.generation !== entry.generation) throw new ReservationError("reservation_generation_stale",409);
                     entry.confirmedAt = now(); entry.trusted = true; entry.expiresAt = data.expires_at;
+                    entry.confirmation = (entry.confirmation || 0) + 1;
                     emit(entry, "active");
                     return data;
                 } catch (error) { fail(entry, error); throw error; }
@@ -122,18 +124,42 @@
             })();
             return entry.renewing;
         }
-        async function release(entry) {
-            if (!entry || entry.busy || entry.acquiring || entry.releasing) return;
+        function release(entry, keepalive = false) {
+            if (!entry || entry.busy || entry.acquiring) return Promise.resolve();
+            if (entry.releasePromise) return entry.releasePromise;
             entry.releasing = true;
             cancel(entry.timer);
-            try {
-                if (entry.renewing) await entry.renewing.catch(() => {});
-                if (entry.token) await send(entry, "release");
-                emit(entry, "available");
-            } catch (error) {
-                // A failed release is NOT evidence of availability. The DB TTL is the fallback.
-                emit(entry, "release_failed", error);
-            } finally { entry.token = null; entries.delete(entry); }
+            entry.releasePromise = Promise.resolve().then(async () => {
+                entry.releaseError = null;
+                try {
+                    if (entry.renewing) await entry.renewing.catch(() => {});
+                    if (entry.token) await send(entry, "release", {}, keepalive);
+                    emit(entry, "available");
+                } catch (error) {
+                    // Retain proof ONLY to retry an authorized release, never to edit.
+                    if (!error.status || error.status >= 500 || error.code === "csrf_failed") {
+                        entry.releaseError = error;
+                    }
+                    emit(entry, "release_failed", error);
+                } finally {
+                    if (!entry.releaseError) { entry.token = null; entries.delete(entry); }
+                    entry.releasing = false;
+                    entry.releasePromise = null;
+                }
+            });
+            return entry.releasePromise;
+        }
+        async function finishClosing(id) {
+            for (const entry of [...entries]) {
+                if (!entry.closing || (id !== undefined && entry.id !== id)) continue;
+                if (entry.busy || entry.acquiring) {
+                    if (id !== undefined) throw new ReservationError("operation_pending",409,
+                        "Aguarde a operação anterior terminar antes de reabrir os detalhes.");
+                    continue;
+                }
+                await release(entry);
+                if (id !== undefined && entry.releaseError) throw entry.releaseError;
+            }
         }
         async function close(internal = false) {
             if (!internal) intent++;
@@ -149,6 +175,7 @@
             if (active?.id === id && canOperate(id)) return snapshot();
             const request = ++intent;
             await close(true);
+            await finishClosing(id);
             if (request !== intent) throw new ReservationError("superseded");
             const entry = {id, interaction: options.uuid(), generation: null, token: null,
                 busy: 0, closing: false, state: "acquiring"};
@@ -209,14 +236,29 @@
         }
         async function status(id) {
             const entry = active?.id === id ? active : null;
+            // Bind this advisory read to the identity and confirmation at SEND time.
+            const sentToken = entry?.token || null;
+            const confirmation = entry?.confirmation;
+            const requestIntent = intent;
+            const sequence = (statusRequests.get(id) || 0) + 1;
+            statusRequests.set(id,sequence);
+            const stillCurrent = () => requestIntent === intent &&
+                sequence === statusRequests.get(id) &&
+                entry === (active?.id === id ? active : null) &&
+                sentToken === (entry?.token || null) &&
+                confirmation === entry?.confirmation && !entry?.closing && !entry?.renewing;
             try {
-                const data = await json(await response(options.url(id,"status"), {headers: entry?.token ? proof(entry) : {}}, options.requestTimeout || 20000));
-                if (entry === active && entry?.token && data.state !== "reserved_self") {
+                const data = await json(await response(options.url(id,"status"), {
+                    headers: sentToken ? proof(entry) : {},
+                }, options.requestTimeout || 20000));
+                if (!stillCurrent()) return {stale:true};
+                if (sentToken && data.state !== "reserved_self") {
                     fail(entry, new ReservationError("reservation_expired",409));
                 }
                 return data;
             } catch (error) {
-                if (entry === active && entry) fail(entry,error);
+                if (!stillCurrent()) return {stale:true};
+                if (entry) fail(entry,error);
                 throw error;
             }
         }
@@ -226,9 +268,14 @@
             }
         }
         async function resume() {
-            if (!active?.token || active.state === "lost") return;
-            active.trusted = false;
-            try { await renew(active); heartbeat(active); } catch { /* state notification */ }
+            const entry = active;
+            if (!entry) { await finishClosing(); return; }
+            if (!entry.token || entry.state === "lost") return;
+            entry.trusted = false;
+            try {
+                await renew(entry);
+                if (active === entry && !entry.closing) heartbeat(entry);
+            } catch { /* state notification; never reacquire automatically */ }
         }
         function invalidate(id) {
             const entry = active;
@@ -246,9 +293,7 @@
             for (const entry of entries) {
                 entry.closing = true; emit(entry,"closing");
                 if (!entry.busy && !entry.acquiring && entry.token) {
-                    cancel(entry.timer);
-                    send(entry,"release",{},true).then(() => emit(entry,"available"),
-                        error => emit(entry,"release_failed",error));
+                    release(entry,true);
                 }
                 // Busy work retains its heartbeat and drains through perform()'s finally.
             }

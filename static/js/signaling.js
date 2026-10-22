@@ -781,7 +781,7 @@ function showPointPopup(marker, point) {
         postJson,
         canEdit: () => waypointReservations.canOperate(point.id),
         onRender: () => reservationUI.bind(marker, point),
-        onBack: () => { waypointReservations.close(); showPointPopup(marker, point); },
+        onBack: () => showPointPopup(marker, point),
         confirm: (message) => reservationUI.confirm(message),
     };
     IntersectionProblems.open({
@@ -911,7 +911,6 @@ function showPointPopup(marker, point) {
 
     popupElement.querySelector("[data-cancel-notes]")
         .addEventListener("click", (event) => {
-            waypointReservations.close();
             L.DomEvent.stopPropagation(event);
             const interventionId = Number(notesPanel.dataset.interventionId);
             const intervention = point.interventions.find(
@@ -1098,14 +1097,12 @@ function wireInterventionForm(marker, point) {
 
     form.querySelector("[data-cancel-intervention]")
         .addEventListener("click", (event) => {
-            waypointReservations.close();
             L.DomEvent.stopPropagation(event);
             showPointPopup(marker, point);
         });
 
     form.querySelector("[data-back-to-signaling]")
         .addEventListener("click", (event) => {
-            waypointReservations.close();
             L.DomEvent.stopPropagation(event);
             showPointPopup(marker, point);
         });

@@ -475,7 +475,9 @@ function signalingContext(fetch, capabilities = {}) {
             return {track() {},start() {},stop() {},refresh() {},beginWrite() {},endWrite() {}};
         }},
         WaypointReservations: {create: () => ({
-            canOperate: () => true, close() {}, perform: async (_id,url,options) => {
+            canOperate: () => true,
+            close() { document.reservationCloseCount = (document.reservationCloseCount || 0) + 1; },
+            perform: async (_id,url,options) => {
                 const response = await fetch(url,options); return response.json();
             },
         })},
@@ -544,10 +546,13 @@ test("main button order and actual handlers open problems or the unchanged inter
     assert.ok(marker.html.indexOf("+ Adicionar sinalização")
         < marker.html.indexOf("+ Adicionar problemas e soluções"));
     assert.ok(marker.html.indexOf("+ Adicionar problemas e soluções") < marker.html.indexOf("Excluir ponto"));
+    await nodes.get("[data-cancel-notes]").fire("click");
+    assert.equal(context.document.reservationCloseCount || 0,0);
     await nodes.get("[data-add-problems]").fire("click");
     assert.equal(context.opened.point.id, 202);
     assert.equal(context.opened.urls.collection, urls.collection);
     context.opened.onBack();
+    assert.equal(context.document.reservationCloseCount || 0,0);
     assert.match(marker.html, /Adicionar sinalização/);
     vm.runInContext("wireInterventionForm = (marker, point) => { window.wiredPoint = point.id; }", context);
     await nodes.get("[data-add-intervention]").fire("click");
@@ -741,3 +746,21 @@ test("real Leaflet adapter adds and updates remote points by ID without opening 
     assert.equal(vm.runInContext("signalingMarkers.size",context),0);
     assert.equal(removed.length,1);
 });
+
+for(const selector of ["[data-cancel-intervention]","[data-back-to-signaling]"]) {
+    test("internal intervention navigation preserves reservation: "+selector,async()=>{
+        const context=signalingContext(async()=>{throw new Error("No request expected");});
+        const nodes=new Map();
+        const form={
+            elements:{type:new Element(),notes:new Element(),"intervention-condition":[]},
+            querySelector(key){if(!nodes.has(key))nodes.set(key,new Element());return nodes.get(key);},
+            querySelectorAll:()=>[],addEventListener(){},
+        };
+        context.marker={getPopup:()=>({getElement:()=>({querySelector:()=>form})})};
+        context.point={id:7};
+        vm.runInContext("wireInterventionForm(marker,point); showPointPopup = () => { window.returned = true; }",context);
+        await nodes.get(selector).fire("click");
+        assert.equal(context.window.returned,true);
+        assert.equal(context.document.reservationCloseCount || 0,0);
+    });
+}

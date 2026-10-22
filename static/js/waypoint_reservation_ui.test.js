@@ -26,7 +26,7 @@ function fixture({change=true,occupied=false}={}) {
     const point={id:7},body=new Node("body"),events={},windows={},intervals=[];
     const document={body,createElement:tag=>new Node(tag),getElementById:()=>null,
         addEventListener:(event,fn)=>events[event]=fn};
-    const window={setInterval:fn=>{intervals.push(fn);return 1;},clearInterval(){},
+    const window={setInterval:(fn,ms)=>{fn.interval=ms;intervals.push(fn);return 1;},clearInterval(){},
         addEventListener:(event,fn)=>windows[event]=fn,location:{pathname:"/",href:"http://localhost/"}};
     let state={pointId:null,state:"idle",busy:0},listener;
     const calls=[];
@@ -89,12 +89,13 @@ test("visibility loss suspends writes; navigation while busy is blocked",async()
     assert.equal(prevented,true);assert.equal(stopped,true);
     assert.equal(f.calls.some(c=>c[0]==="leave"),false);
 });
-test("report close discards a late HTML response and delegates draining to manager",async()=>{
+test("report close after popup closes discards late HTML and delegates draining to manager",async()=>{
     const f=fixture();f.bind();await f.ui.begin(f.marker,f.point);
     let resolve;f.manager.perform=()=>new Promise(done=>resolve=done);
     const pending=f.ui.openReport(7,"/signaling/points/7/report/");
     const dialog=f.body.children.at(-1);
     assert.equal(dialog.shown,true);
+    f.marker.isPopupOpen=()=>false;
     dialog.children[0].onclick();assert.equal(dialog.removed,true);
     resolve("old report");await pending;
     assert.equal(dialog.children[2].srcdoc,undefined);
@@ -110,4 +111,140 @@ test("normal popup has no management card or permanent release/restart button",a
     assert.equal(notice.children[1].hidden,true);
     await f.ui.begin(f.marker,f.point);f.bind();
     assert.equal(notice.children[1].hidden,true);
+});
+
+test("three-second status polling and repeated panel binding preserve the active popup lifecycle",async()=>{
+    const f=fixture();f.bind();await f.ui.begin(f.marker,f.point);
+    f.manager.status=async()=>({state:"reserved_self"});
+    const listeners=Object.fromEntries(Object.entries(f.root.events).map(([type,list])=>[type,list.length]));
+    for(let i=0;i<12;i++){f.bind();await f.intervals[0]();}
+    assert.equal(f.intervals.length,1);
+    assert.equal(f.intervals[0].interval,3000);
+    assert.equal(f.calls.filter(call=>call[0]==="acquire").length,1);
+    assert.equal(f.calls.filter(call=>call[0]==="close").length,0);
+    assert.equal(f.renders,1);
+    assert.equal(f.manager.canOperate(7),true);
+    assert.deepEqual(Object.fromEntries(Object.entries(f.root.events).map(([type,list])=>[type,list.length])),listeners);
+    f.ui.end(7);assert.equal(f.calls.filter(call=>call[0]==="close").length,1);
+});
+test("an obsolete status cannot display foreign ownership over a live own popup",async()=>{
+    const f=fixture();f.bind();await f.ui.begin(f.marker,f.point);
+    const message=f.root.children[0].children[0];
+    message.textContent="owned";
+    f.manager.status=async()=>({stale:true,state:"reserved_other"});
+    await f.intervals[0]();
+    assert.equal(message.textContent,"owned");
+    assert.equal(f.manager.canOperate(7),true);
+    assert.equal(f.calls.some(call=>call[0]==="close"),false);
+});
+
+test("leaving report for the still-open map popup must preserve its acquisition",async()=>{
+    const f=fixture();f.bind();await f.ui.begin(f.marker,f.point);
+    let resolve;f.manager.perform=()=>new Promise(done=>resolve=done);
+    const pending=f.ui.openReport(7,"/signaling/points/7/report/");
+    f.body.children.at(-1).children[0].onclick();
+    resolve("late HTML");await pending;
+    assert.equal(f.calls.filter(c=>c[0]==="close").length,0);
+    assert.equal(f.manager.canOperate(7),true);
+    f.ui.end(7);
+    assert.equal(f.calls.filter(c=>c[0]==="close").length,1);
+});
+
+function reportDOM(t,f) {
+    const oldParser=global.DOMParser, oldObserver=global.MutationObserver;
+    global.DOMParser=class{parseFromString(){return {
+        createElement:tag=>new Node(tag),head:{prepend(){}},documentElement:{outerHTML:"<html>report</html>"},
+    };}};
+    global.MutationObserver=class{observe(){}disconnect(){}};
+    t.after(()=>{global.DOMParser=oldParser;global.MutationObserver=oldObserver;});
+    const events={};
+    const doc={querySelectorAll:()=>[],addEventListener:(type,fn)=>events[type]=fn};
+    const win={FormData:class{},HTMLFormElement:{prototype:{submit(){}}}};
+    return {events,attach(){
+        const dialog=f.body.children.at(-1),frame=dialog.children[2];
+        frame.contentDocument=doc;frame.contentWindow=win;frame.onload();
+        return {dialog,frame,win};
+    }};
+}
+test("HTML report returns to the same map acquisition and preserves close/reopen lifecycle",async(t)=>{
+    const f=fixture();f.bind();await f.ui.begin(f.marker,f.point);
+    const dom=reportDOM(t,f),mapRead=f.manager.perform;
+    f.manager.perform=async(_id,_url,_options,consume)=>consume({ok:true,text:async()=>"<html>HTML report</html>"});
+    await f.ui.openReport(7,"/signaling/points/7/report/");
+    const {dialog,frame}=dom.attach();
+    assert.match(frame.srcdoc,/html/);
+    f.manager.status=async()=>({state:"reserved_self"});
+    await f.intervals[0](); // status during report
+    dom.events.click({target:{closest:()=>({target:"",getAttribute:()=>"/"})},preventDefault(){}});
+    assert.equal(dialog.removed,true);
+    assert.equal(f.calls.filter(call=>call[0]==="close").length,0);
+    assert.equal(f.manager.canOperate(7),true);
+    f.ui.end(7);assert.equal(f.calls.filter(call=>call[0]==="close").length,1);
+    f.manager.perform=mapRead;
+    await f.ui.begin(f.marker,f.point);
+    assert.equal(f.calls.filter(call=>call[0]==="acquire").length,2);
+    assert.equal(f.manager.canOperate(7),true);
+});
+test("DOCX form consumes the artifact without ending the map lease",async(t)=>{
+    const f=fixture();f.bind();await f.ui.begin(f.marker,f.point);
+    const dom=reportDOM(t,f),requests=[],downloads=[];
+    // Download link only: report DOM remains the real UI controller under test.
+    t.mock.method(URL,"createObjectURL",()=>"blob:report-test");
+    t.mock.method(URL,"revokeObjectURL",()=>{});
+    t.mock.method(global,"setTimeout",fn=>{fn();return 1;});
+    f.manager.perform=async(id,url,options={},consume)=>{
+        requests.push({id,url,method:options.method||"GET"});
+        return consume({ok:true,headers:{get:()=>"application/vnd.openxmlformats-officedocument.wordprocessingml.document"},
+            text:async()=>"<html>report</html>",blob:async()=>new Blob(["docx"])});
+    };
+    // The document factory creates the download anchor inside the production handler.
+    const previousClick=Node.prototype.click;
+    Node.prototype.click=function(){downloads.push(this.download);};
+    t.after(()=>{if(previousClick)Node.prototype.click=previousClick;else delete Node.prototype.click;});
+    await f.ui.openReport(7,"/signaling/points/7/report/");
+    const {dialog}=dom.attach();
+    const form={dataset:{},matches:selector=>selector==="[data-waypoint-report-form]"};
+    await dom.events.submit({target:form,preventDefault(){}});
+    assert.deepEqual(requests.map(item=>item.method),["GET","POST"]);
+    assert.deepEqual(downloads,["relatorio-sinalizacao.docx"]);
+    dialog.children[0].onclick();
+    assert.equal(f.calls.filter(call=>call[0]==="close").length,0);
+});
+test("failed or expired report does not silently reacquire or release the map waypoint",async()=>{
+    for(const state of ["uncertain","lost"]){
+        const f=fixture();f.bind();await f.ui.begin(f.marker,f.point);
+        f.manager.perform=async()=>{
+            f.emit({state});
+            throw Object.assign(new Error("Report rejected"),{code:state==="lost"?"reservation_expired":"network"});
+        };
+        await f.ui.openReport(7,"/signaling/points/7/report/");
+        f.body.children.at(-1).children[0].onclick();
+        assert.equal(f.calls.filter(call=>call[0]==="close").length,0);
+        assert.equal(f.calls.filter(call=>call[0]==="acquire").length,1);
+        assert.equal(f.manager.canOperate(7),false);
+    }
+});
+test("BFCache restored popup offers a fresh acquisition instead of remaining visually locked",async()=>{
+    const f=fixture();f.bind();await f.ui.begin(f.marker,f.point);
+    f.manager.leave=()=>f.emit({pointId:null,state:"idle"});
+    f.windows.pagehide({persisted:true});await f.windows.pageshow({persisted:true});
+    const retry=f.root.children[0].children[1];
+    assert.equal(f.write.disabled,true);
+    assert.equal(retry.hidden,false);
+    assert.equal(f.calls.filter(call=>call[0]==="acquire").length,1);
+});
+
+test("BFCache restoration dismisses a report tied to an ended acquisition and drops late HTML",async()=>{
+    const f=fixture();f.bind();await f.ui.begin(f.marker,f.point);
+    let resolve;f.manager.perform=()=>new Promise(done=>resolve=done);
+    const pending=f.ui.openReport(7,"/signaling/points/7/report/");
+    const dialog=f.body.children.at(-1);
+    f.manager.leave=()=>f.emit({pointId:null,state:"idle"});
+    f.windows.pagehide({persisted:true});await f.windows.pageshow({persisted:true});
+    assert.equal(dialog.removed,true);
+    resolve("ended report");await pending;
+    assert.equal(dialog.children[2].srcdoc,undefined);
+    assert.equal(f.write.disabled,true);
+    assert.equal(f.root.children[0].children[1].hidden,false);
+    assert.equal(f.calls.filter(call=>call[0]==="acquire").length,1);
 });

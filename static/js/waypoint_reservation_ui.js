@@ -75,7 +75,9 @@
             binding.message.textContent = relevant ? (state.message || labels[state.state]) : labels.idle;
             binding.message.hidden = allowed || (relevant && state.state === "renewing");
             binding.retry.disabled = !!state.busy || state.state === "acquiring" || state.state === "closing";
-            binding.retry.hidden = allowed || !relevant || !["lost","uncertain","occupied"].includes(state.state);
+            const endedHere = state.state === "idle" && current?.point.id === binding.point.id;
+            binding.retry.hidden = allowed || (!endedHere &&
+                (!relevant || !["lost","uncertain","occupied"].includes(state.state)));
             binding.panel.hidden = allowed;
             controls(binding.element, allowed);
         }
@@ -186,7 +188,13 @@
                 flow.closing = true; report = null;
                 flow.observer?.disconnect();
                 dialog.close(); dialog.remove();
-                manager.close(); // manager drains pending work before release, discards its results
+                if (current?.point.id === id && current.marker.isPopupOpen()) {
+                    // The report is a panel of the same map interaction, not its owner.
+                    manager.resume();
+                    bindings.forEach(update);
+                } else {
+                    manager.close(); // No remaining UI owner: drain work before release.
+                }
             };
             closeButton.onclick = finish;
             dialog.addEventListener("cancel",event => { event.preventDefault(); finish(); });
@@ -272,6 +280,8 @@
                 for (const id of batch) {
                     try {
                         const data = await manager.status(id);
+                        if (data.stale || (manager.snapshot().pointId === id &&
+                                manager.snapshot().state === "acquiring")) continue;
                         badge(id,data.state === "reserved_self" ? "active" : data.state === "reserved_other" ? "occupied" : "available");
                         const binding = bindings.get(id);
                         if (binding && !manager.canOperate(id) && data.state === "available") {
@@ -287,7 +297,15 @@
             if (document.hidden) manager.suspend(); else manager.resume();
         });
         window.addEventListener("pagehide",() => manager.leave());
-        window.addEventListener("pageshow",() => manager.resume());
+        window.addEventListener("pageshow",async () => {
+            await manager.resume();
+            if (report && manager.snapshot().pointId !== report.id) {
+                // BFCache must not restore a form tied to an ended acquisition.
+                report.closing = true; report.observer?.disconnect();
+                report.dialog.close(); report.dialog.remove(); report = null;
+            }
+            bindings.forEach(update);
+        });
         // Navigation/logout are blocked while a server operation may still be running.
         document.addEventListener("submit",event => {
             if (event.target.closest(".leaflet-popup")) return;

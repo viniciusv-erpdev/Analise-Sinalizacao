@@ -41,7 +41,9 @@ Durante uso normal não há controles manuais de reserva. Avisos discretos e
 “Tentar editar novamente” aparecem somente quando a edição precisa de recuperação.
 A aquisição ao abrir e a liberação ao fechar continuam automáticas.
 
-Fechar popup, trocar ponto ou cancelar edição invalida a interação local.
+Fechar o popup ou trocar de waypoint invalida a interação local.
+Voltar/cancelar um painel interno descarta apenas seu rascunho, preservando a
+aquisição enquanto os detalhes do waypoint continuarem abertos.
 Operações já enviadas mantêm heartbeat até terminar o recebimento do corpo; seus
 resultados são descartados se a interação tiver sido encerrada. Só então ocorre
 a liberação. Uma gravação enviada pode já ter sido confirmada pelo servidor:
@@ -65,8 +67,9 @@ O gerenciador permanece no documento do mapa e continua renovando. Um bridge
 em memória encaminha PGTs e o envio multipart do formulário com a mesma prova.
 Caracterização e uploads preservam o formulário existente. HTML inválido de
 formulário é reapresentado; DOCX só é baixado após consumir o corpo e confirmar
-novamente a aquisição. Encerrar o relatório descarta respostas tardias.
-O backend mantém snapshot + revalidação 3A; nenhum lock longo foi introduzido.
+novamente a aquisição. Encerrar o relatório descarta respostas tardias. Se os detalhes do mapa continuam
+abertos, a mesma aquisição é preservada e confirmada antes de editar. Se o popup
+também foi fechado, a liberação aguarda operações pendentes. O backend mantém snapshot + revalidação 3A; nenhum lock longo foi introduzido.
 
 Não navegar diretamente para o report protegido nem usar seu link em outra aba:
 essa aba não possui a aquisição. Abrir o relatório pelo popup. A limitação é
@@ -80,7 +83,7 @@ Enquanto desconhecido, o estado não é apresentado como disponível. O popup in
 aquisição, confirmação, perda e falha de rede; informações autorizadas permanecem
 legíveis. Controles combinam permissões 2A e confirmação da reserva.
 
-O polling de status ocorre a cada 20 segundos: até quatro marcadores visíveis
+O polling de status ocorre a cada três segundos: até quatro marcadores visíveis
 mais o ponto aberto, sequencialmente, sem aquisição automática. Mapas grandes
 podem demorar várias rodadas para atualizar todos os indicadores. Abas ocultas
 não consultam status. A tentativa de aquisição sempre consulta o backend, sem
@@ -111,7 +114,7 @@ CSRF. Recebe {"known": {"<id>": "<sha256>"}} e retorna success, upserts (point e
 revision) e deleted (IDs). Não consulta nem altera reservas; não retorna sua
 geração, sessão, titular ou token. O payload de ponto reutiliza o serializer do mapa.
 
-waypoint_sync.js consulta a cada dez segundos, com uma requisição por vez.
+waypoint_sync.js consulta a cada três segundos, com uma requisição por vez.
 O carregamento inicial permanece no HTML. A resposta traz apenas diferenças;
 o servidor lê o inventário completo a cada chamada, portanto este protocolo não
 é um log incremental de eventos. O custo cresce com o número de pontos e notas,
@@ -130,13 +133,13 @@ são adiadas e seu hash não avança: reaparecem na resposta após fechar os det
 Sua exclusão invalida a edição e descarta resultados pendentes, sem release HTTP
 pelo polling; o backend já excluiu o ponto. Gravações locais invalidam respostas
 iniciadas antes delas. Rede indisponível mantém os marcadores. Em segundo plano,
-o timer verifica a cada minuto sem fazer consultas; ao retornar há nova consulta.
+o timer verifica a cada 18 segundos sem fazer consultas; ao retornar há nova consulta.
 Inicialização repetida interrompe o controlador anterior e start é idempotente.
 
 ## Homologação adicional — sincronização em dois navegadores
 
 1. Entrar como A e B autorizados em navegadores separados. A cria um ponto:
-   confirmar que aparece em B em aproximadamente dez segundos, sem reload,
+   confirmar que aparece em B em aproximadamente três segundos, sem reload,
    popup automático ou POST de aquisição provocado pela sincronização.
 2. A fecha os detalhes; B abre e altera status, raio, intervenção e notas.
    Ao fechar B, confirmar os dados e a aparência em A, sem duplicação.
@@ -160,9 +163,9 @@ No terminal local com PostgreSQL, repetir:
 
 ## Validação desta execução
 
-- JavaScript: 123 testes aprovados no comando da CI, incluindo as suítes por import.
-- Django no ajuste de UX/sincronização: 34 testes aprovados (sincronização,
-  autorização e fluxo principal), em SQLite isolado em memória.
+- JavaScript: 144 testes aprovados no comando da CI, incluindo as suítes por import.
+- Django após a correção do polling/navegação: 318 testes encontrados,
+  277 aprovados e 41 ignorados, em SQLite isolado em memória.
   Essa execução não comprova locks nem concorrência PostgreSQL.
 - manage.py check e git diff --check: sem problemas.
 - PostgreSQL: não executado por este processo, que não recebeu credenciais.
@@ -202,8 +205,9 @@ cria/remove somente seu banco de testes. Não usar credenciais de produção.
 7. Suspender rede e depois a aba. Controles devem suspender. Recuperar a conexão:
    exigir confirmação; se expirou, nova aquisição explícita. Não reenviar escrita.
 8. Gerar relatório HTML, consultar PGTs, editar caracterização, anexar fotos e baixar
-   DOCX. Verificar heartbeat durante geração. Fechar durante geração: resultado
-   tardio não deve aparecer e a liberação aguarda o trabalho recebido terminar.
+   DOCX. Verificar heartbeat durante geração. Fechar o relatório retorna ao mapa
+   sem perder a aquisição do popup aberto; resultado tardio não deve aparecer.
+   Fechar também os detalhes deve aguardar o trabalho pendente antes de liberar.
 9. Encerrar sessão em outra aba e tentar operar: exigir login, sem repetir escrita.
    Testar também usuário sem change/delete/report e CSRF inválido; reservas não
    devem conceder permissões.
@@ -213,3 +217,106 @@ cria/remove somente seu banco de testes. Não usar credenciais de produção.
 Rollback: reverter os arquivos desta etapa de forma coordenada. O frontend antigo
 não envia provas e ficará impedido pelo backend 3A (428), portanto não equivale a
 restaurar edição. Nunca desabilitar os guards do backend para contornar rollback.
+
+## Diagnóstico — navegação interna e polling de três segundos
+
+Duas regressões foram reproduzidas antes da correção, com logs temporários no
+harness executando o gerenciador real e backend simulado. Somente evento, estado
+local, existência da reserva simulada e contagem de encerramentos foram registrados.
+Os logs foram removidos após o diagnóstico; nenhuma credencial foi impressa.
+
+1. Status iniciado durante acquire saía sem prova, retornava reserved_other e
+   chegava depois da concessão. O mesmo objeto local já tinha recebido o token:
+   a consulta antiga o marcava lost. O trace mostrou serverReserved=true,
+   localState=lost e releaseCount=0. Isso reproduz interpretação incorreta no
+   frontend, sem demonstrar perda real no PostgreSQL do ambiente do usuário.
+2. Voltar de problemas, voltar/cancelar intervenção e cancelar notas chamavam
+   close(), apesar de os detalhes permanecerem abertos. O trace do handler
+   onBack confirmou closeCount=1. Essa é uma liberação indevida no fluxo interno.
+   Enquanto release não confirma (ou falha), a reserva antiga ainda pode existir
+   sem prova local, aparecendo corretamente como ocupada numa consulta sem prova.
+
+Consultas agora vinculam sua validade ao estado no envio: intenção de aquisição,
+objeto proprietário, presença da prova, confirmação de renovação e sequência de
+consulta por waypoint. Dados/erros obsoletos retornam stale e não alteram estado
+nem indicadores. Status durante renovação é descartado conservadoramente;
+heartbeat e operações continuam confirmando no backend.
+
+A sincronização de conteúdo já pula pontos abertos; isso permanece testado.
+Reconstruir o painel principal por navegação interna é intencional e não encerra
+a reserva. Bind não registra novos timers nem duplica os guards do popup.
+Os intervalos permanecem em três segundos.
+
+Expiração/perda real continua sendo rejeitada pelo backend. Não foi inspecionada
+a reserva do navegador do usuário no PostgreSQL, nem presumido que o banco a
+perdeu. A prova transacional continua nos testes PostgreSQL existentes, que devem
+ser repetidos no terminal local com o ambiente de testes carregado.
+
+## Diagnóstico — retorno do relatório e bfcache
+
+O fluxo normal não navega para fora do mapa: o clique é interceptado e o HTML
+obtido com prova entra no iframe srcdoc do diálogo. “Voltar ao mapa” no relatório
+encerra esse diálogo. DOCX é recebido por fetch e baixado por blob URL.
+O backend não adquire/libera reservas no relatório; mantém snapshot + revalidação.
+Abrir a URL protegida diretamente em outra aba não transporta prova, e recebe 428
+quando autorizado mas sem aquisição (ou login/403 conforme a sessão/permissões).
+A aba do mapa continua titular; não há compartilhamento de credenciais.
+
+Antes da correção, duas regressões novas falharam:
+- Fechar relatório com popup aberto registrava closeCount=1, quando a interação
+  do mapa ainda precisava da aquisição. A interface podia ficar idle/somente
+  leitura; com release malsucedido, a reserva continuava válida no servidor.
+- Após leave com falha de rede no release, resume não acompanhava nem repetia a
+  liberação. A reserva simulada permanecia ocupada; uma nova aquisição concorria
+  legitimamente contra a anterior, embora fosse o mesmo usuário.
+
+A correção mantém a aquisição enquanto o popup do mapa estiver aberto e confirma
+sua validade ao voltar. O cancelamento descarta resultados do diálogo encerrado;
+não cancela trabalho já enviado no servidor nem libera durante processamento.
+Sem popup proprietário, o gerenciador encerra e libera após drenar o trabalho.
+
+Em saída real de página, a aquisição é encerrada localmente. A liberação passa
+pelo mesmo caminho acompanhado, com fetch keepalive na saída. Se não houver
+confirmação por rede/5xx/CSRF, a prova fica SOMENTE em memória para repetir release
+autorizado, nunca para voltar a editar. Ao retornar pelo bfcache, resume tenta
+concluir essa liberação; acquire aguarda a conclusão antes de disputar uma
+aquisição nova. Não há aquisição forçada nem reutilização da geração antiga.
+Release com geração obsoleta não libera o titular posterior.
+
+Pageshow confirma aquisições ainda ativas; para as já encerradas, oferece nova
+tentativa contextual. Relatórios restaurados com aquisição encerrada são fechados
+e respostas pendentes descartadas. A ausência de prova ativa nunca habilita edição.
+
+Classificação das evidências:
+- A (reserva real anterior): reproduzido com backend simulado e release falho;
+  os testes verificam retry autorizado e geração nova, sem remover titular alheio.
+- B (bloqueio visual): encerramento indevido do gerenciador e ausência de ação
+  contextual após retorno foram reproduzidos por handlers reais em DOM doubles.
+- C (outro titular): permanece bloqueado nos testes com gerenciadores independentes.
+- D (expiração/substituição): relatórios são descartados e nova aquisição é explícita.
+Não foi inspecionada a reserva da sessão do navegador no PostgreSQL local.
+
+Homologação adicional:
+1. Abrir ponto em A; gerar HTML e DOCX; voltar pelo link e pelo botão do diálogo.
+   Editar novamente sem fechar o popup. Não deve haver release nesse retorno.
+2. Enquanto o relatório estiver ativo, tentar adquirir em outra aba e no usuário B.
+   Ambos devem continuar impedidos. Fechar o popup em A e confirmar liberação.
+3. Fechar relatório durante processamento: nenhum arquivo tardio deve aparecer.
+   Fechar também o popup: liberação somente depois do processamento recebido.
+4. Navegar para outra página com rede normal, voltar pelo histórico e confirmar
+   que uma aquisição encerrada exige nova tentativa, sem reusar suas credenciais.
+5. Repetir com falha de rede na saída e recuperação no retorno: retry de release
+   deve anteceder acquire. Se o documento foi destruído, não existe prova em
+   memória para recuperar; aguardar o TTL, sem storage nem bypass.
+6. Retornar por bfcache com relatório aberto: formulário da aquisição encerrada
+   deve desaparecer e controles continuar suspensos até nova aquisição válida.
+7. Expirar a aquisição durante geração; adquirir em B; confirmar descarte do
+   resultado antigo e impossibilidade de A liberar ou editar a geração de B.
+
+Validação desta correção: suíte JavaScript completa aprovada; Django
+accidents.test_main_flow signaling: 318 encontrados, 277 aprovados, 41 ignorados
+em SQLite isolado. PostgreSQL não estava acessível ao processo do agente.
+Executar os comandos PostgreSQL documentados acima no terminal local.
+Os testes JavaScript não demonstram exclusividade transacional nem substituem
+homologação real de bfcache em navegador. Nenhum arquivo de backend, migration,
+serviço PostgreSQL ou infraestrutura foi alterado nesta correção.
