@@ -82,3 +82,5 @@ htmlcov/
 data/local/*.xlsx
 data/local/*.csv
 data/raw/*.csv
+
+/scripts/local-postgres-env.ps1

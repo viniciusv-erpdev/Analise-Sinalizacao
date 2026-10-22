@@ -6,6 +6,7 @@ on:
     branches:
       - vinicius
       - main
+      - 'feature/**'
   pull_request:
     branches:
       - main
@@ -37,7 +38,15 @@ jobs:
           DJANGO_DEBUG: "True"
         run: python manage.py check
 
-      - name: Executar testes do fluxo principal
+      - name: Executar testes do fluxo principal e sinalização
         env:
           DJANGO_DEBUG: "True"
-        run: python manage.py test accidents.test_main_flow
+        run: python manage.py test accidents.test_main_flow signaling
+
+      - name: Configurar Node para testes de interface
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Testar interface de mapa e sinalização
+        run: node --test static/js/individual_filters.test.js static/js/map.test.js static/js/intersection_problems.test.js static/js/report_characterization.test.js

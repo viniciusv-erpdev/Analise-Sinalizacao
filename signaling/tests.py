@@ -1,3 +1,5 @@
+from signaling.test_support import ReservationClient, ReservationFunctionalTestMixin
+from signaling.test_support import authorize
 from decimal import Decimal
 import json
 
@@ -182,8 +184,10 @@ class SignalingInterventionTests(TestCase):
             intervention.full_clean()
 
 
-class SignalingPointEndpointTests(TestCase):
+class SignalingPointEndpointTests(ReservationFunctionalTestMixin, TestCase):
     def setUp(self):
+        super().setUp()
+        authorize(self.client)
         self.create_url = reverse("signaling:create-point")
 
     def create_point(self) -> SignalingPoint:
@@ -453,13 +457,16 @@ class SignalingPointEndpointTests(TestCase):
         self.assertEqual(other_point.search_radius_meters, 150)
 
 
-class SignalingInterventionEndpointTests(TestCase):
+class SignalingInterventionEndpointTests(ReservationFunctionalTestMixin, TestCase):
     def setUp(self):
+        super().setUp()
+        authorize(self.client)
         self.point = SignalingPoint.objects.create(
             latitude=Decimal("-21.170000"),
             longitude=Decimal("-47.810000"),
             status=SignalingPoint.Status.INCOMPLETE,
         )
+        self.client.reserve(self.point.pk)
         self.url = reverse(
             "signaling:save-intervention",
             args=[self.point.id],
