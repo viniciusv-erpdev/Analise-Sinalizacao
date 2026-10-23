@@ -84,3 +84,7 @@ data/local/*.csv
 data/raw/*.csv
 
 /scripts/local-postgres-env.ps1
+# Bancos SQLite locais e backups
+*.sqlite3
+*.sqlite3-*
+*.sqlite3.*
