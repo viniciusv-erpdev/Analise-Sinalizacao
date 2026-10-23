@@ -1,0 +1,15 @@
+<div class="mb-2">
+    <p class="alert alert-warning" data-signaling-auth-notice hidden role="alert">
+        Sua sessão expirou. <a href="{% url 'login' %}?next={{ request.get_full_path|urlencode }}">Entrar novamente</a>.
+    </p>
+    {% if user.is_authenticated %}
+        <span>Usuário: {{ user.get_username }}</span>
+        <form method="post" action="{% url 'logout' %}" class="mt-1">
+            {% csrf_token %}
+            <button class="btn btn-outline-secondary btn-sm" type="submit">Sair e encerrar análise</button>
+            <small class="d-block">Sair encerra a análise armazenada nesta sessão.</small>
+        </form>
+    {% else %}
+        <a class="btn btn-outline-primary btn-sm" href="{% url 'login' %}?next={{ request.get_full_path|urlencode }}">Entrar</a>
+    {% endif %}
+</div>

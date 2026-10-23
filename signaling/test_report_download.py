@@ -1,3 +1,5 @@
+from signaling.test_support import ReservationClient, ReservationFunctionalTestMixin
+from signaling.test_support import authorize
 from io import BytesIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -24,14 +26,17 @@ DOCX_CONTENT_TYPE = (
 )
 
 
-class SignalingReportDownloadTests(TestCase):
+class SignalingReportDownloadTests(ReservationFunctionalTestMixin, TestCase):
     def setUp(self):
+        super().setUp()
+        authorize(self.client, ("view_signalingpoint", "generate_signaling_report"))
         self.point = SignalingPoint.objects.create(
             latitude=0,
             longitude=0,
             status=SignalingPoint.Status.INCOMPLETE,
             search_radius_meters=100,
         )
+        self.client.reserve(self.point.pk)
         self.url = reverse("signaling:point-report", args=[self.point.id])
 
     def set_individual_analysis(self, accidents=None):

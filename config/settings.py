@@ -147,3 +147,15 @@ MAILERS = {
         ),
     },
 }
+
+# Application login; the public analysis and healthcheck remain accessible.
+LOGIN_URL = "login"
+LOGIN_REDIRECT_URL = "analysis"
+LOGOUT_REDIRECT_URL = "analysis"
+
+CSRF_FAILURE_VIEW = "signaling.authorization.csrf_failure"
+
+
+# Reservation services require PostgreSQL row locks; no SQLite fallback.
+WAYPOINT_RESERVATION_TTL_SECONDS = 120
+WAYPOINT_RESERVATION_RENEW_INTERVAL_SECONDS = 30

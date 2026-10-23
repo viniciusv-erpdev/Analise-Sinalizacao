@@ -1,5 +1,6 @@
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
+from django.conf import settings
 
 from signaling.intersection_problems import problem_solution_codes, validate_problem_solution
 
@@ -33,8 +34,14 @@ class SignalingPoint(models.Model):
             MaxValueValidator(MAX_SIGNALING_SEARCH_RADIUS_METERS),
         ],
     )
+    # Survives removal of a reservation row; never reset while this point exists.
+    reservation_generation = models.PositiveBigIntegerField(default=0, editable=False)
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        permissions = [("generate_signaling_report", "Pode gerar relatórios de sinalização")]
 
     def __str__(self) -> str:
         return f"Ponto {self.pk} ({self.latitude}, {self.longitude})"
@@ -152,3 +159,42 @@ class SignalingPointProblemSolution(models.Model):
 
     def __str__(self) -> str:
         return f"{self.problem_id}: {self.solution_code}"
+
+
+class WaypointReservation(models.Model):
+    """Current acquisition or released tombstone. Never expose credential fields."""
+    signaling_point = models.OneToOneField(
+        SignalingPoint, on_delete=models.CASCADE, related_name="reservation",
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, editable=False,
+    )
+    session_digest = models.CharField(max_length=64, editable=False)
+    interaction_id = models.UUIDField(editable=False)
+    token_digest = models.CharField(max_length=64, editable=False)
+    generation = models.PositiveBigIntegerField(editable=False)
+    acquired_at = models.DateTimeField(editable=False)
+    renewed_at = models.DateTimeField(editable=False)
+    expires_at = models.DateTimeField(editable=False, db_index=True)
+    released_at = models.DateTimeField(null=True, blank=True, editable=False)
+
+    class Meta:
+        default_permissions = ()
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(generation__gt=0), name="reservation_generation_positive",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(renewed_at__gte=models.F("acquired_at"))
+                & models.Q(expires_at__gt=models.F("renewed_at")),
+                name="reservation_valid_times",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(released_at__isnull=True)
+                | models.Q(released_at__gte=models.F("acquired_at")),
+                name="reservation_release_after_acquire",
+            ),
+        ]
+
+    def __str__(self):
+        return f"Reservation for waypoint {self.signaling_point_id}"

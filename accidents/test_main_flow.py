@@ -1,3 +1,5 @@
+from signaling.test_support import ReservationClient, ReservationFunctionalTestMixin
+from signaling.test_support import authorize
 """Integrações HTTP com CSVs sintéticos e processamento/relatório reais.
 
 Somente o HTTP externo do Overpass é mockado. O polígono municipal versionado,
@@ -229,11 +231,13 @@ class UploadFlowTests(MainFlowFixtures, TestCase):
         self.http.assert_not_called()
 
 
-class ReportFlowTests(MainFlowFixtures, TestCase):
+class ReportFlowTests(ReservationFunctionalTestMixin, MainFlowFixtures, TestCase):
     def setUp(self):
+        authorize(self.client)
         super().setUp()
         self.upload(individual_files())
         self.point_id = self.create_point()
+        self.client.reserve(self.point_id)
         self.report_path = reverse("signaling:point-report", args=[self.point_id])
         self.search_path = reverse("signaling:search-point-pgts", args=[self.point_id])
         self.form_data = {

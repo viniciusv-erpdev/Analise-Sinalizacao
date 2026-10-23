@@ -1,3 +1,5 @@
+from signaling.test_support import ReservationClient, ReservationFunctionalTestMixin
+from signaling.test_support import authorize, authorized_client
 """Contrato persistente dos problemas: catálogo, ORM e API, sem interface."""
 import json
 from unittest.mock import patch
@@ -251,9 +253,12 @@ class PointProblemTests(TestCase):
         self.assertEqual(list(record.solutions.values_list("solution_code", flat=True)), ["P3A", "P3B"])
 
 
-class PointProblemAPITests(TestCase):
+class PointProblemAPITests(ReservationFunctionalTestMixin, TestCase):
     def setUp(self):
+        super().setUp()
+        authorize(self.client, ("view_signalingpoint", "change_signalingpoint"))
         self.point = make_point()
+        self.client.reserve(self.point.pk)
         self.url = reverse("signaling:point-problems", args=[self.point.pk])
 
     def post(self, payload, url=None, client=None):
@@ -277,7 +282,7 @@ class PointProblemAPITests(TestCase):
         problem = self.point.problems.get()
         self.assertEqual(problem.problem_code, "P1")
         self.assertEqual(list(problem.solutions.values_list("solution_code", flat=True)), ["P1A", "P1B"])
-        result = Client().get(self.url)
+        result = authorized_client().get(self.url)
         self.assertEqual(result.status_code, 200)
         data = result.json()
         self.assertEqual(data["point_id"], self.point.pk)
@@ -298,12 +303,12 @@ class PointProblemAPITests(TestCase):
             self.assertEqual(result.status_code, 200)
             self.assertEqual(result.json()["id"], record["id"])
             self.assertEqual([item["code"] for item in result.json()["solutions"]], codes)
-            self.assertEqual(Client().get(self.url).json()["problems"][0]["solutions"],
+            self.assertEqual(authorized_client().get(self.url).json()["problems"][0]["solutions"],
                              result.json()["solutions"])
-        confirmed = Client().get(self.url).json()["problems"]
+        confirmed = authorized_client().get(self.url).json()["problems"]
         for codes in [[], None, "P3A", ["P3C", "P1A"], ["P3C", "P3C"], [None]]:
             self.assertEqual(self.post({"solution_codes": codes}, url).status_code, 400)
-            self.assertEqual(Client().get(self.url).json()["problems"], confirmed)
+            self.assertEqual(authorized_client().get(self.url).json()["problems"], confirmed)
 
     def test_multiple_creation_and_invalid_collection_payloads(self):
         for code, codes in [("P1", ["P1A", "P1B"]),
@@ -335,7 +340,7 @@ class PointProblemAPITests(TestCase):
     def test_create_multiple_and_persist_in_new_client_session(self):
         first = self.create()
         self.create("P3", "P3C")
-        response = Client().get(self.url)
+        response = authorized_client().get(self.url)
         self.assertEqual(response.status_code, 200)
         records = response.json()["problems"]
         self.assertEqual([p["problem_code"] for p in records], ["P1", "P3"])
@@ -399,7 +404,7 @@ class PointProblemAPITests(TestCase):
         self.assertEqual(original.solutions.get().solution_code, "P1B")
         self.assertEqual(self.point.problems.count(), 1)
         self.assertGreaterEqual(original.updated_at, original.created_at)
-        self.assertEqual(Client().get(self.url).json()["problems"][0]["solutions"][0]["code"], "P1B")
+        self.assertEqual(authorized_client().get(self.url).json()["problems"][0]["solutions"][0]["code"], "P1B")
 
     def test_invalid_update_never_changes_persisted_pair(self):
         record = self.create()
@@ -440,7 +445,9 @@ class PointProblemAPITests(TestCase):
         self.assertEqual(self.client.put(self.url).status_code, 405)
 
     def test_shared_access_and_csrf_protection_for_all_writes(self):
-        client = Client(enforce_csrf_checks=True)
+        self.client.release(self.point.pk)
+        client = ReservationClient(enforce_csrf_checks=True)
+        authorize(client, ("view_signalingpoint", "change_signalingpoint"))
         self.assertEqual(client.get(self.url).status_code, 200)
         payload = {"problem_code": "P1", "solution_codes": ["P1A"]}
         self.assertEqual(self.post(payload, client=client).status_code, 403)
@@ -460,6 +467,8 @@ class PointProblemAPITests(TestCase):
 
     def test_existing_waypoint_delete_cascades(self):
         self.create()
+        self.client.release(self.point.pk)
+        authorize(self.client, ("view_signalingpoint", "delete_signalingpoint"))
         response = self.post({}, reverse("signaling:delete-point", args=[self.point.pk]))
         self.assertEqual(response.status_code, 200)
         self.assertFalse(SignalingPointProblem.objects.exists())

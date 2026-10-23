@@ -3,11 +3,13 @@ from decimal import Decimal, InvalidOperation
 
 from django.core.exceptions import ValidationError
 from django.http import FileResponse, HttpRequest, JsonResponse
-from django.shortcuts import get_object_or_404, render
+from django.shortcuts import render
 from django.templatetags.static import static
 from django.utils import timezone
 from django.views.decorators.http import require_POST, require_http_methods
 
+from signaling.authorization import ADD, CHANGE, DELETE, REPORT, signaling_access
+from signaling.reservation_http import reservation_required, reservation_snapshot
 from signaling.intersection_problems import serialize_problem_catalog
 from signaling.services import (
     create_point_problem, serialize_point_problem, update_point_problem_solutions,
@@ -48,11 +50,10 @@ SEARCH_RADIUS_ERROR = (
 )
 
 
+@signaling_access(REPORT, api=False)
+@reservation_snapshot(survey=True)
 def point_report(request: HttpRequest, point_id: int):
-    point = get_object_or_404(
-        SignalingPoint.objects.prefetch_related("interventions"),
-        pk=point_id,
-    )
+    point = request.reservation_point
     analysis_state = request.session.get(ANALYSIS_SESSION_KEY)
     survey = None
     filter_error = None
@@ -76,6 +77,7 @@ def point_report(request: HttpRequest, point_id: int):
             survey = build_signaling_survey_from_items(
                 point,
                 filtered_accidents,
+                point_items=request.reservation_items,
             )
             survey["filters"] = report_filters.presentation()
 
@@ -136,12 +138,10 @@ def point_report(request: HttpRequest, point_id: int):
 
 
 @require_POST
+@signaling_access(REPORT)
+@reservation_snapshot()
 def search_point_pgts(request: HttpRequest, point_id: int) -> JsonResponse:
-    # O relatório atual compartilha os pontos, sem restrição por proprietário.
-    try:
-        point = SignalingPoint.objects.get(pk=point_id)
-    except SignalingPoint.DoesNotExist:
-        return _api_not_found("Ponto de sinalização")
+    point = request.reservation_point
     try:
         results = find_nearby_pgts(
             latitude=point.latitude,
@@ -219,6 +219,7 @@ def _normalize_coordinate(value: object) -> object:
 
 
 @require_POST
+@signaling_access(ADD)
 def create_point(request: HttpRequest) -> JsonResponse:
     data = _read_json(request)
     if data is None:
@@ -249,6 +250,8 @@ def create_point(request: HttpRequest) -> JsonResponse:
 
 
 @require_POST
+@signaling_access(DELETE)
+@reservation_required()
 def delete_point(request: HttpRequest, point_id: int) -> JsonResponse:
     try:
         point = SignalingPoint.objects.get(pk=point_id)
@@ -259,6 +262,8 @@ def delete_point(request: HttpRequest, point_id: int) -> JsonResponse:
 
 
 @require_POST
+@signaling_access(CHANGE)
+@reservation_required()
 def update_point_status(request: HttpRequest, point_id: int) -> JsonResponse:
     try:
         point = SignalingPoint.objects.get(pk=point_id)
@@ -287,6 +292,8 @@ def update_point_status(request: HttpRequest, point_id: int) -> JsonResponse:
 
 
 @require_POST
+@signaling_access(CHANGE)
+@reservation_required()
 def update_point_search_radius(
     request: HttpRequest,
     point_id: int,
@@ -341,6 +348,8 @@ def update_point_search_radius(
 
 
 @require_POST
+@signaling_access(CHANGE)
+@reservation_required()
 def save_intervention(request: HttpRequest, point_id: int) -> JsonResponse:
     try:
         point = SignalingPoint.objects.get(pk=point_id)
@@ -382,6 +391,8 @@ def save_intervention(request: HttpRequest, point_id: int) -> JsonResponse:
 
 
 @require_POST
+@signaling_access(CHANGE)
+@reservation_required()
 def delete_intervention(
     request: HttpRequest,
     point_id: int,
@@ -401,6 +412,8 @@ def delete_intervention(
 
 
 @require_POST
+@signaling_access(CHANGE)
+@reservation_required()
 def update_intervention_condition(
     request: HttpRequest,
     point_id: int,
@@ -436,6 +449,8 @@ def update_intervention_condition(
 
 
 @require_POST
+@signaling_access(CHANGE)
+@reservation_required()
 def update_intervention_notes(
     request: HttpRequest,
     point_id: int,
@@ -470,6 +485,8 @@ def update_intervention_notes(
 
 
 @require_http_methods(["GET", "POST"])
+@signaling_access(write_permissions=(CHANGE,))
+@reservation_required(write_only=True)
 def point_problems(request: HttpRequest, point_id: int) -> JsonResponse:
     try:
         point = SignalingPoint.objects.get(pk=point_id)
@@ -497,6 +514,8 @@ def point_problems(request: HttpRequest, point_id: int) -> JsonResponse:
 
 
 @require_POST
+@signaling_access(CHANGE)
+@reservation_required()
 def update_problem_solution(
     request: HttpRequest, point_id: int, problem_id: int,
 ) -> JsonResponse:
@@ -522,6 +541,8 @@ def update_problem_solution(
 
 
 @require_POST
+@signaling_access(CHANGE)
+@reservation_required()
 def delete_point_problem(
     request: HttpRequest, point_id: int, problem_id: int,
 ) -> JsonResponse:
