@@ -1,39 +1,37 @@
-<!doctype html>
-<html lang="pt-BR">
-<head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Criar conta — Análise Sinalização</title>
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css"
-          integrity="sha384-sRIl4kxILFvY47J16cr9ZwB07vP4J8+LH7qKQnuqkuIAvNWLzeN8tE5YBujZqJLB" crossorigin="anonymous">
-    {% include "includes/favicon.html" %}
-</head>
-<body class="bg-light">
-<main class="container py-5" style="max-width: 480px">
-    <div class="card shadow-sm"><div class="card-body">
-        <h1 class="h4">Criar conta</h1>
-        {% if registration_available %}
-        <form method="post">
-            {% csrf_token %}
-            {% for error in form.non_field_errors %}
-                <p class="alert alert-danger" role="alert">{{ error }}</p>
-            {% endfor %}
-            {% for field in form %}
-            <div class="mb-3">
-                {{ field.label_tag }}
-                {{ field }}
-                {% if field.help_text %}<div class="form-text">{{ field.help_text }}</div>{% endif %}
-                {% for error in field.errors %}<p class="text-danger" role="alert">{{ error }}</p>{% endfor %}
-            </div>
-            {% endfor %}
-            <input type="hidden" name="next" value="{{ next }}">
-            <button class="btn btn-primary w-100" type="submit">Criar conta</button>
-        </form>
-        {% else %}
-            <p class="alert alert-warning" role="alert">{{ unavailable_message }}</p>
+{% extends "registration/base.html" %}
+{% block title %}Criar conta{% endblock %}
+{% block page_class %}auth-page--register{% endblock %}
+{% block heading %}Criar conta{% endblock %}
+{% block description %}Preencha seus dados para começar a usar o sistema.{% endblock %}
+{% block content %}
+{% if registration_available %}
+<form method="post" class="auth-form">
+    {% csrf_token %}
+    {% for error in form.non_field_errors %}
+        <p class="auth-message auth-message--error" role="alert">{{ error }}</p>
+    {% endfor %}
+    {% for field in form %}
+    <div class="auth-field{% if field.errors %} auth-field--invalid{% endif %}">
+        {{ field.label_tag }}
+        {{ field }}
+        {% if field.help_text %}
+        <div class="auth-help{% if field.name == 'password1' %} auth-help--rules{% endif %}" id="{{ field.auto_id }}_helptext">
+            {% if field.name == 'password1' %}<span class="auth-help__heading">Para uma senha segura</span>{% endif %}
+            {{ field.help_text }}
+        </div>
         {% endif %}
-        <a class="d-block mt-3" href="{% url 'login' %}{% if next %}?next={{ next|urlencode }}{% endif %}">Voltar ao login</a>
-    </div></div>
-</main>
-</body>
-</html>
+        {% if field.errors %}
+        <div class="auth-errors" id="{{ field.auto_id }}_error" role="alert">
+            {% for error in field.errors %}<p>{{ error }}</p>{% endfor %}
+        </div>
+        {% endif %}
+    </div>
+    {% endfor %}
+    <input type="hidden" name="next" value="{{ next }}">
+    <button class="auth-submit" type="submit">Criar conta</button>
+</form>
+{% else %}
+    <p class="auth-message auth-message--warning" role="alert">{{ unavailable_message }}</p>
+{% endif %}
+<p class="auth-secondary"><a href="{% url 'login' %}{% if next %}?next={{ next|urlencode }}{% endif %}">Voltar ao login</a></p>
+{% endblock %}
