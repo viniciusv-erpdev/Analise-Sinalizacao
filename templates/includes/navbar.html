@@ -1,0 +1,20 @@
+{% load static %}
+<header class="app-navbar">
+    <div class="app-navbar__identity">
+        <img src="{% static 'images/logo.svg' %}" width="32" height="32" alt="">
+        <span class="app-navbar__title">Análise de Sinistros e Sinalização</span>
+    </div>
+    <nav class="app-navbar__actions" aria-label="Navegação principal">
+        <div class="app-navbar__tools-slot">
+            <button id="open-tools-panel" class="open-tools-panel-button" type="button"
+                    aria-label="Abrir painel de ferramentas" aria-controls="tools-panel"
+                    aria-expanded="false" title="Abrir ferramentas" hidden>
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                     stroke-width="1.8" stroke-linecap="round" aria-hidden="true" focusable="false">
+                    <path d="M4 6h16M4 12h16M4 18h16"></path>
+                </svg>
+            </button>
+        </div>
+        {% include "registration/account_controls.html" with navbar=True %}
+    </nav>
+</header>

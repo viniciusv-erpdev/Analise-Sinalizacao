@@ -12,7 +12,7 @@
         content="width=device-width, initial-scale=1.0"
     >
 
-    <title>Mapa de Sinistros</title>
+    <title>Análise de Sinistros e Sinalização</title>
 
     <link
         rel="stylesheet"
@@ -26,10 +26,7 @@
         crossorigin="anonymous"
     >
 
-    <link 
-    rel="icon"
-    type="image/svg+xml"
-    href="{% static 'images/favicon.svg' %}">
+    {% include "includes/favicon.html" %}
 
     <style>
 
@@ -1377,11 +1374,14 @@
         }
 
     </style>
+    <link rel="stylesheet" href="{% static 'css/app-shell.css' %}">
 
 </head>
 
-<body>
+<body class="app-shell">
+    {% include "includes/navbar.html" %}
 
+    <main class="app-workspace" aria-label="Mapa e ferramentas de análise">
     <div
         id="map"
         data-has-active-analysis="{% if import_summary %}true{% else %}false{% endif %}"
@@ -1396,7 +1396,6 @@
         data-has-server-state="{% if import_summary or import_error %}true{% else %}false{% endif %}"
         data-initial-tab="{{ initial_tool_tab }}"
     >
-        {% include "registration/account_controls.html" %}
         <div class="tools-panel-header">
             <h1>Análise de sinistros</h1>
 
@@ -1768,18 +1767,7 @@
         </div>
     </section>
 
-    <button
-        id="open-tools-panel"
-        class="open-tools-panel-button"
-        type="button"
-        aria-label="Abrir painel de ferramentas"
-        aria-controls="tools-panel"
-        aria-expanded="false"
-        title="Abrir ferramentas"
-        hidden
-    >
-        &#9776;
-    </button>
+    </main>
 
     {{ map_data|json_script:"map-data" }}
     {{ view_mode|json_script:"view-mode" }}

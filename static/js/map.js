@@ -1,5 +1,5 @@
 const mapElement = document.getElementById("map");
-const map = L.map(mapElement).setView(
+const map = L.map(mapElement, {zoomControl: false}).setView(
     [-21.1775, -47.8103],
     12
 );

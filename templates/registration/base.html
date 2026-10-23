@@ -1,0 +1,33 @@
+{% load static %}
+<!doctype html>
+<html lang="pt-BR">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% block title %}{% endblock %} — Análise de Sinistros e Sinalização</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css"
+          integrity="sha384-sRIl4kxILFvY47J16cr9ZwB07vP4J8+LH7qKQnuqkuIAvNWLzeN8tE5YBujZqJLB" crossorigin="anonymous">
+    <link rel="stylesheet" href="{% static 'css/app-shell.css' %}">
+    <link rel="stylesheet" href="{% static 'css/auth.css' %}">
+    {% include "includes/favicon.html" %}
+</head>
+<body class="app-shell auth-page {% block page_class %}{% endblock %}">
+<main class="auth-layout">
+    <header class="auth-brand">
+        <img src="{% static 'images/logo.svg' %}" width="36" height="36" alt="">
+        <span>Análise de Sinistros e Sinalização</span>
+    </header>
+    <section class="auth-card" aria-labelledby="auth-title">
+        <header class="auth-heading">
+            <h1 id="auth-title">{% block heading %}{% endblock %}</h1>
+            <p>{% block description %}{% endblock %}</p>
+        </header>
+        {% for message in messages %}
+            <p class="auth-message auth-message--info" role="status">{{ message }}</p>
+        {% endfor %}
+        {% block content %}{% endblock %}
+    </section>
+    {% block footer %}{% endblock %}
+</main>
+</body>
+</html>
