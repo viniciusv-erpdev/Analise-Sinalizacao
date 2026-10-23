@@ -175,12 +175,11 @@
         async function openReport(id,url) {
             if (report) return;
             const dialog = document.createElement("dialog");
-            dialog.style.cssText = "width:96vw;max-width:1400px;height:94vh;border:1px solid #ccc;border-radius:8px";
+            dialog.className = "waypoint-report-dialog";
             const closeButton = document.createElement("button");
             closeButton.className = "btn btn-outline-secondary btn-sm"; closeButton.textContent = "Encerrar relatório";
             const message = document.createElement("p"); message.className = "small"; message.setAttribute("role","status");
             const frame = document.createElement("iframe"); frame.title = "Relatório de sinalização";
-            frame.style.cssText = "width:100%;height:calc(100% - 70px);border:0";
             dialog.append(closeButton,message,frame); document.body.append(dialog);
             const flow = {id, dialog, frame, message, closing:false, url}; report = flow;
             const finish = () => {
@@ -256,7 +255,10 @@
                 // Set only a public base URL; proof remains in the parent manager's closure.
                 const parsed = new DOMParser().parseFromString(html,"text/html");
                 const base = parsed.createElement("base"); base.href = new URL(flow.url,window.location.href).href;
-                parsed.head.prepend(base); frame.srcdoc = "<!doctype html>" + parsed.documentElement.outerHTML;
+                // Embedded screen layout only; standalone/print styles stay unchanged.
+                const embeddedStyle = parsed.createElement("style");
+                embeddedStyle.textContent = "@media screen { html .report-accidents { max-height: none; } }";
+                parsed.head.prepend(base,embeddedStyle); frame.srcdoc = "<!doctype html>" + parsed.documentElement.outerHTML;
             }
             try {
                 const html = await manager.perform(id,url,{},async res => {
