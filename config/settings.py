@@ -159,3 +159,10 @@ CSRF_FAILURE_VIEW = "signaling.authorization.csrf_failure"
 # Reservation services require PostgreSQL row locks; no SQLite fallback.
 WAYPOINT_RESERVATION_TTL_SECONDS = 120
 WAYPOINT_RESERVATION_RENEW_INTERVAL_SECONDS = 30
+
+
+# Public registration grants the permissions of the existing analista group.
+registration_value = os.environ.get("DJANGO_REGISTRATION_ENABLED", "True").strip().lower()
+if registration_value not in {"true", "false", "1", "0", "yes", "no", "on", "off"}:
+    raise ImproperlyConfigured("DJANGO_REGISTRATION_ENABLED must be true/false, 1/0, yes/no or on/off.")
+REGISTRATION_ENABLED = registration_value in {"true", "1", "yes", "on"}

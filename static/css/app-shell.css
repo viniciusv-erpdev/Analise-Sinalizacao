@@ -1,0 +1,180 @@
+/* Application shell only; Leaflet, popups and tool contents retain their styles. */
+.app-shell {
+    --app-navbar-height: 60px;
+    --app-navbar-bg: #172B4D;
+    --app-navbar-text: #FFFFFF;
+    --app-button-bg: #294368;
+    --app-button-hover: #365580;
+    --app-button-active: #102039;
+    --app-navbar-border: #102039;
+    --app-focus: #93C5FD;
+    --app-menu-bg: #FFFFFF;
+    --app-menu-text: #25394b;
+    --app-menu-muted: #526577;
+    --app-menu-border: #d8e2ec;
+    --app-menu-divider: #e8edf3;
+    --app-menu-success: #227449;
+    --app-menu-focus: #236aa5;
+    overflow: hidden;
+}
+.app-navbar {
+    position: fixed;
+    inset: 0 0 auto;
+    height: var(--app-navbar-height);
+    z-index: 1100;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 8px 20px;
+    box-sizing: border-box;
+    background: var(--app-navbar-bg);
+    color: var(--app-navbar-text);
+    border-bottom: 1px solid var(--app-navbar-border);
+    box-shadow: 0 1px 3px rgb(23 77 122 / 5%);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+.app-navbar__identity {
+    display: flex;
+    align-items: center;
+    flex: 1;
+    gap: 12px;
+    min-width: 0;
+}
+.app-navbar__identity img {
+    flex: none;
+    width: 32px;
+    height: auto;
+    object-fit: contain;
+}
+.app-navbar__title {
+    min-width: 0;
+    font-size: 18px;
+    font-weight: 600;
+    line-height: 1.25;
+    letter-spacing: -0.02em;
+    overflow-wrap: anywhere;
+}
+.app-navbar__actions { display: flex; align-items: center; gap: 8px; flex: none; }
+.app-navbar__tools-slot { width: 44px; height: 44px; }
+.app-navbar .open-tools-panel-button,
+.app-account__trigger {
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 44px;
+    height: 44px;
+    padding: 0;
+    color: var(--app-navbar-text);
+    background: var(--app-button-bg);
+    border: 1px solid var(--app-button-bg);
+    border-radius: 8px;
+    cursor: pointer;
+    transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+.app-navbar .open-tools-panel-button {
+    position: static;
+    box-shadow: none;
+}
+.app-account__trigger { list-style: none; }
+.app-account__trigger::-webkit-details-marker { display: none; }
+.app-navbar :is(.open-tools-panel-button, .app-account__trigger):hover {
+    background: var(--app-button-hover);
+    border-color: var(--app-button-hover);
+}
+.app-navbar :is(.open-tools-panel-button, .app-account__trigger):active,
+.app-navbar .open-tools-panel-button[aria-expanded="true"],
+.app-account__dropdown[open] > summary {
+    color: var(--app-navbar-text);
+    background: var(--app-button-active);
+    border-color: var(--app-focus);
+}
+.app-navbar :is(button, a, summary):focus-visible {
+    outline: 3px solid var(--app-focus);
+    outline-offset: 3px;
+}
+.app-workspace {
+    position: fixed;
+    inset: var(--app-navbar-height) 0 0;
+    min-width: 0;
+    isolation: isolate;
+}
+.app-account { position: relative; }
+.app-account__menu {
+    position: absolute;
+    top: calc(100% + 10px);
+    right: 0;
+    box-sizing: border-box;
+    width: min(288px, calc(100vw - 24px));
+    max-height: calc(100vh - var(--app-navbar-height) - 16px);
+    max-height: calc(100dvh - var(--app-navbar-height) - 16px);
+    overflow-y: auto;
+    display: grid;
+    gap: 12px;
+    padding: 16px;
+    color: var(--app-menu-text);
+    background: var(--app-menu-bg);
+    border: 1px solid var(--app-menu-border);
+    border-radius: 10px;
+    box-shadow: 0 4px 12px rgb(23 77 122 / 10%);
+}
+/* A darker ring stays visible against the light account menu. */
+.app-navbar .app-account__menu :is(button, a):focus-visible {
+    outline-color: var(--app-menu-focus);
+}
+.app-account__name {
+    font-size: 15px;
+    font-weight: 650;
+    line-height: 1.4;
+    overflow-wrap: anywhere;
+}
+.app-account__status { color: var(--app-menu-muted); font-size: 13px; }
+.app-account__status > span { color: var(--app-menu-success); }
+.app-account__menu form {
+    margin: 0;
+    padding-top: 12px;
+    border-top: 1px solid var(--app-menu-divider);
+}
+.app-account__menu .btn {
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 7px;
+    font-size: 14px;
+    font-weight: 600;
+    transition: background-color 120ms ease, border-color 120ms ease;
+}
+.app-account__menu .btn-primary {
+    --bs-btn-bg: var(--app-button-bg);
+    --bs-btn-border-color: var(--app-button-bg);
+    --bs-btn-hover-bg: var(--app-button-hover);
+    --bs-btn-hover-border-color: var(--app-button-hover);
+    --bs-btn-active-bg: var(--app-button-active);
+    --bs-btn-active-border-color: var(--app-button-active);
+}
+.app-account__help { display: block; margin-top: 10px; color: var(--app-menu-muted); font-size: 12px; line-height: 1.5; }
+.app-account__notice {
+    position: fixed;
+    top: calc(var(--app-navbar-height) + 8px);
+    right: 12px;
+    width: min(360px, calc(100vw - 24px));
+}
+@media (max-width: 768px) {
+    .app-navbar { padding-inline: 12px; gap: 12px; }
+    .app-navbar__title { font-size: 16px; }
+}
+@media (max-width: 520px) {
+    .app-shell { --app-navbar-height: 64px; }
+    .app-navbar { padding-inline: 10px; gap: 8px; }
+    .app-navbar__identity { gap: 8px; }
+    .app-navbar__identity img { width: 28px; }
+    .app-navbar__title { font-size: 13px; letter-spacing: 0; }
+    .app-navbar__actions { gap: 4px; }
+}
+@media (prefers-reduced-motion: reduce) {
+    .app-navbar .open-tools-panel-button,
+    .app-account__trigger,
+    .app-account__menu .btn { transition: none; }
+}
