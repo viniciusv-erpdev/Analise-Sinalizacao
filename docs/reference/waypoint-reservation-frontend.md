@@ -19,7 +19,7 @@ intersection_problems que a CI existente já executa.
 
 Abrir um popup solicita uma aquisição; nenhuma operação exclusiva fica habilitada
 antes da aquisição e da atualização dos dados. Cada aquisição gera um UUID v4 novo
-com crypto.randomUUID. Credenciais permanecem no closure do gerenciador, sem
+com o helper uuidV4 de waypoint_reservations.js. Credenciais permanecem no closure do gerenciador, sem
 armazenamento persistente ou comunicação entre abas. O snapshot público não inclui
 token nem geração. A prova é enviada somente nos três headers do contrato 3A.
 
@@ -96,7 +96,9 @@ Um bearer deliberadamente copiado continua reutilizável. UUID de documento não
 uma identidade impossível de falsificar. XSS e extensões com acesso à página são
 fora desse limite de isolamento. Não há bypass administrativo novo.
 
-Requer navegador moderno com crypto.randomUUID (HTTPS ou localhost), dialog,
+Requer navegador moderno com crypto.randomUUID ou crypto.getRandomValues (também
+em HTTP interno). Sem fonte criptográfica, a aquisição falha com mensagem controlada.
+Também requer dialog,
 fetch, AbortSignal.timeout/any e MutationObserver. As chamadas de controle têm timeout de 20 segundos; operações protegidas têm
 limite de cinco minutos, permitindo heartbeat durante gerações demoradas.
 PGTs mantêm o limite de 20 segundos da interface existente. Um timeout não
