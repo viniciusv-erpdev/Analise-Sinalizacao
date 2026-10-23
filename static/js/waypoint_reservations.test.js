@@ -338,3 +338,58 @@ test("BFCache recovery must not release another interaction's newer acquisition"
     assert.equal((await next.manager.status(7)).state,"reserved_self");
     await assert.rejects(old.manager.acquire(7),{code:"reservation_occupied"});
 });
+
+function browserReservations(crypto) {
+    const vm = require("node:vm");
+    const context = vm.createContext({crypto, Uint8Array, setTimeout, clearTimeout, AbortSignal, performance});
+    vm.runInContext(require("node:fs").readFileSync(require("node:path").join(__dirname,"waypoint_reservations.js"),"utf8"), context);
+    return context.WaypointReservations;
+}
+const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+test("UUID helper prefers native randomUUID with its crypto receiver", () => {
+    const crypto = {randomUUID() { assert.equal(this,crypto); return "native-uuid"; },
+        getRandomValues() { assert.fail("fallback must not run"); }};
+    assert.equal(browserReservations(crypto).uuidV4(),"native-uuid");
+});
+test("HTTP browser without randomUUID acquires, renews and releases with secure UUID v4", async () => {
+    const webcrypto = require("node:crypto").webcrypto;
+    let draws = 0;
+    const api = browserReservations({getRandomValues(bytes) { draws++; return webcrypto.getRandomValues(bytes); }});
+    const backend = server();
+    const manager = api.create({fetch:backend.fetch,csrf:()=>"csrf",url:(id,op)=>`/points/${id}/${op}/`,
+        setTimeout:()=>0,clearTimeout:()=>{}});
+    await manager.acquire(7);
+    const first = backend.held.interaction_id;
+    assert.match(first,uuidPattern);
+    await manager.renew();
+    assert.equal(manager.canOperate(7),true);
+    assert.equal(backend.held.interaction_id,first);
+    await manager.close();
+    assert.equal(backend.held,null);
+    await manager.acquire(7);
+    assert.match(backend.held.interaction_id,uuidPattern);
+    assert.notEqual(backend.held.interaction_id,first);
+    assert.equal(draws,2);
+    await manager.close();
+});
+test("UUID fallback sets version and variant bits and preserves other random bits", () => {
+    for (const byte of [0,255]) {
+        const api=browserReservations({getRandomValues(bytes) { assert.equal(bytes.length,16); bytes.fill(byte); }});
+        assert.equal(api.uuidV4(),byte===0 ? "00000000-0000-4000-8000-000000000000" : "ffffffff-ffff-4fff-bfff-ffffffffffff");
+    }
+});
+for (const crypto of [undefined, {}, {getRandomValues:undefined},
+    {getRandomValues() { throw new Error("unavailable"); }}]) {
+    test("missing or failing secure randomness blocks acquisition with a controlled error", async () => {
+        const api=browserReservations(crypto),backend=server();
+        const manager=api.create({fetch:backend.fetch});
+        await assert.rejects(manager.acquire(7), error => {
+            assert.equal(error.code,"secure_random_unavailable");
+            assert.match(error.message,/geração segura/);
+            return true;
+        });
+        assert.equal(backend.calls.length,0);
+        assert.equal(manager.canOperate(7),false);
+        assert.equal(manager.snapshot().state,"idle");
+    });
+}

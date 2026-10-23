@@ -15,6 +15,7 @@
         reservation_credentials_invalid: "A reserva não pertence a esta interação.",
         reservation_inactive: "A reserva foi encerrada.",
         reservation_required: "Adquira uma reserva antes de continuar.",
+        secure_random_unavailable: "Este navegador não oferece geração segura de identificadores. Use um navegador atualizado ou acesse por HTTPS para editar waypoints.",
         network: "Sem confirmação do servidor. Edição suspensa até recuperar a conexão.",
         superseded: "Interação encerrada. O resultado anterior foi descartado.",
     };
@@ -23,6 +24,21 @@
             super(messages[code] || detail || "Não foi possível confirmar a reserva.");
             this.code = code; this.status = status;
         }
+    }
+    function uuidV4(cryptoSource = globalThis.crypto) {
+        try {
+            if (typeof cryptoSource?.randomUUID === "function") return cryptoSource.randomUUID();
+            if (typeof cryptoSource?.getRandomValues === "function") {
+                const bytes = new Uint8Array(16);
+                cryptoSource.getRandomValues(bytes);
+                bytes[6] = (bytes[6] & 0x0f) | 0x40;
+                bytes[8] = (bytes[8] & 0x3f) | 0x80;
+                const hex = Array.from(bytes, byte => byte.toString(16).padStart(2, "0"));
+                return [hex.slice(0,4), hex.slice(4,6), hex.slice(6,8),
+                    hex.slice(8,10), hex.slice(10)].map(part => part.join("")).join("-");
+            }
+        } catch { /* API failure must also block acquisition safely. */ }
+        throw new ReservationError("secure_random_unavailable");
     }
     function create(options) {
         const fetcher = options.fetch;
@@ -177,7 +193,7 @@
             await close(true);
             await finishClosing(id);
             if (request !== intent) throw new ReservationError("superseded");
-            const entry = {id, interaction: options.uuid(), generation: null, token: null,
+            const entry = {id, interaction: (options.uuid || uuidV4)(), generation: null, token: null,
                 busy: 0, closing: false, state: "acquiring"};
             active = entry; entries.add(entry); emit(entry, "acquiring");
             entry.acquiring = (async () => {
@@ -302,5 +318,5 @@
             snapshot: () => snapshot(), suspend, resume, leave, invalidate,
             subscribe(fn) { listeners.add(fn); return () => listeners.delete(fn); }};
     }
-    return {create, ReservationError};
+    return {create, ReservationError, uuidV4};
 }));
