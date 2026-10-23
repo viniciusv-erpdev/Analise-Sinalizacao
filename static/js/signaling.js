@@ -1141,7 +1141,6 @@ function wireInterventionForm(marker, point) {
 
 const waypointReservations = WaypointReservations.create({
     fetch: (...args) => fetch(...args), csrf: getCsrfToken,
-    uuid: () => crypto.randomUUID(),
     url: (id, operation) => signalingConfig.dataset[
         "reservation" + operation[0].toUpperCase() + operation.slice(1) + "UrlTemplate"
     ].replace("/0/", "/" + id + "/"),
