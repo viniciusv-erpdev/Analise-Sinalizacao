@@ -1,0 +1,2 @@
+# Optional PoC dependency: structural PDF validation; not a rendering engine.
+pypdf==6.21.3

@@ -247,3 +247,9 @@ Esse registro não constitui assinatura digital ou certificação jurídica.
 
 O endpoint continua gerando DOCX em memória, com os dados atuais do formulário;
 não há PDF, numeração oficial ou armazenamento de documentos finalizados.
+
+
+## PoC isolada de conversão PDF
+
+Serviço, dependências opcionais, limites, comandos e pendências de aceite:
+[docx-to-pdf-poc.md](docx-to-pdf-poc.md). A PoC não altera o download DOCX nem o fluxo HTTP.
