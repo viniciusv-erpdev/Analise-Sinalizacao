@@ -393,3 +393,27 @@ for (const crypto of [undefined, {}, {getRandomValues:undefined},
         assert.equal(manager.snapshot().state,"idle");
     });
 }
+
+
+test("draft content conflict preserves the valid acquisition and original CSRF headers",async()=>{
+    const backend=server(),fetch=backend.fetch;
+    backend.fetch=async(url,options)=>{
+        if (url.endsWith("/report-draft/")) {
+            backend.calls.push({url,options});
+            return {ok:false,status:409,json:async()=>({success:false,code:"draft_revision_conflict",revision:2})};
+        }
+        return fetch(url,options);
+    };
+    const c=client(backend);await c.manager.acquire(7);c.csrf="draft-csrf";
+    await assert.rejects(c.manager.perform(7,"/points/7/report-draft/",{
+        method:"POST",headers:{"Content-Type":"application/json"},body:"{}",
+    }),{code:"draft_revision_conflict"});
+    assert.equal(c.manager.canOperate(7),true);
+    assert.equal(c.manager.snapshot().state,"active");
+    const call=backend.calls.find(item=>item.url.endsWith("/report-draft/"));
+    assert.equal(call.options.headers["X-CSRFToken"],"draft-csrf");
+    assert.equal(call.options.headers["X-Waypoint-Token"],"secret-1");
+    assert.equal(call.options.headers["X-Waypoint-Interaction"],"tab-1");
+    assert.equal(call.options.headers["X-Waypoint-Generation"],"1");
+    await c.manager.renew();assert.equal(c.manager.canOperate(7),true);
+});

@@ -71,6 +71,7 @@
             if (active !== entry || entry.closing) throw new ReservationError("superseded");
         }
         function fail(entry, error) {
+            if (error.code === "draft_revision_conflict") return;
             if (["network","invalid_response"].includes(error.code)) {
                 entry.trusted = false; emit(entry, "uncertain", error);
             }

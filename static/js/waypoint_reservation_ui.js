@@ -53,6 +53,12 @@
                 }
             });
         }
+        function reportControls(doc, allowed) {
+            controls(doc, allowed, "input[type=file], select, button:not([data-draft-retry])");
+            doc.querySelectorAll("input:not([type=file]):not([type=hidden]), textarea").forEach(node => {
+                node.readOnly = !allowed; // Preserve selection/copy after losing the lease.
+            });
+        }
         function badge(id, state) {
             const icon = markers.get(id)?.getElement();
             if (!icon) return;
@@ -88,10 +94,14 @@
             badge(state.pointId, state.state);
             bindings.forEach(update);
             if (report) {
-                const allowed = manager.canOperate(report.id) && !report.closing;
+                if (state.pointId !== report.id || ["idle","lost","closing","release_failed","acquiring","occupied"].includes(state.state)) {
+                    report.invalidated = true; report.draft?.stop();
+                } else if (state.state === "uncertain") report.draft?.pause();
+                else report.draft?.resume();
+                const allowed = manager.canOperate(report.id) && !report.closing && !report.invalidated;
                 report.message.textContent = state.message || labels[state.state] || "";
                 const doc = report.frame.contentDocument;
-                if (doc) controls(doc, allowed, "input, textarea, select, button");
+                if (doc) reportControls(doc, allowed);
             }
         });
         function bind(marker, point) {
@@ -182,9 +192,18 @@
             const frame = document.createElement("iframe"); frame.title = "Relatório de sinalização";
             dialog.append(closeButton,message,frame); document.body.append(dialog);
             const flow = {id, dialog, frame, message, closing:false, url}; report = flow;
-            const finish = () => {
-                if (flow.closing) return;
+            const finish = async () => {
+                if (flow.closing || flow.finishing) return false;
+                flow.finishing = true;
+                try {
+                    if (flow.draft?.hasPending()) {
+                        if (!flow.invalidated && manager.canOperate(id)) await flow.draft.flush();
+                        if (flow.draft.hasPending() && !await confirm(
+                            "Há alterações não salvas neste relatório. Deseja descartá-las e encerrar? Cancelar mantém os textos abertos.")) return false;
+                    }
+                } finally { flow.finishing = false; }
                 flow.closing = true; report = null;
+                flow.draft?.destroy();
                 flow.observer?.disconnect();
                 dialog.close(); dialog.remove();
                 if (current?.point.id === id && current.marker.isPopupOpen()) {
@@ -203,21 +222,26 @@
                 return {ok:true,status:200,json:async () => data};
             }
             function show(html) {
-                if (flow.closing || report !== flow) return;
+                if (flow.closing || flow.invalidated || report !== flow) return;
                 frame.onload = () => {
-                    if (flow.closing) return;
+                    if (flow.closing || flow.invalidated) return;
                     const doc = frame.contentDocument, win = frame.contentWindow;
                     win.waypointReservationRequest = request;
+                    if (flow.draft) flow.draft.attach(doc);
+                    else if (window.ReportDraft) flow.draft = window.ReportDraft.mount({manager,pointId:id,doc});
                     flow.observer?.disconnect();
-                    flow.observer = new MutationObserver(() => controls(doc,
-                        manager.canOperate(id) && !flow.closing, "input, textarea, select, button"));
+                    flow.observer = new MutationObserver(() => reportControls(doc,
+                        manager.canOperate(id) && !flow.closing && !flow.invalidated));
                     flow.observer.observe(doc,{subtree:true,childList:true,attributes:true,attributeFilter:["disabled"]});
-                    controls(doc,manager.canOperate(id), "input, textarea, select, button");
+                    reportControls(doc,manager.canOperate(id) && !flow.invalidated);
                     doc.addEventListener("submit",async event => {
                         event.preventDefault();
                         if (!event.target.matches("[data-waypoint-report-form]")) {
                             if (manager.snapshot().busy) { message.textContent = "Aguarde a operação em andamento antes de sair."; return; }
                             // Account logout: retain native POST + CSRF after release.
+                            if (flow.draft?.hasPending()) {
+                                message.textContent = "Encerre o relatório e resolva as alterações pendentes antes de sair."; return;
+                            }
                             const form = event.target; await manager.close();
                             form.target = "_top"; win.HTMLFormElement.prototype.submit.call(form);
                             return;
@@ -226,6 +250,8 @@
                         if (form.dataset.sending === "true" || !manager.canOperate(id)) return;
                         form.dataset.sending = "true";
                         try {
+                            if (flow.draft) await flow.draft.flush();
+                            if (flow.closing || flow.invalidated || !manager.canOperate(id)) return;
                             const result = await manager.perform(id,flow.url,{method:"POST",body:new win.FormData(form)},
                                 async res => {
                                     const type = res.headers.get("Content-Type") || "";
@@ -233,7 +259,7 @@
                                     if (!res.ok) throw new Error("Não foi possível gerar o relatório.");
                                     return {blob:await res.blob()};
                                 });
-                            if (flow.closing) return;
+                            if (flow.closing || flow.invalidated) return;
                             if (result.html) show(result.html);
                             else {
                                 const objectUrl = URL.createObjectURL(result.blob);
@@ -254,6 +280,10 @@
                 };
                 // Set only a public base URL; proof remains in the parent manager's closure.
                 const parsed = new DOMParser().parseFromString(html,"text/html");
+                if (flow.draft?.hasPending() && parsed.querySelector && !parsed.querySelector("[data-waypoint-report-form]")) {
+                    message.textContent = "Não foi possível atualizar o relatório. Seus textos foram mantidos; confira a análise e os filtros.";
+                    return;
+                }
                 const base = parsed.createElement("base"); base.href = new URL(flow.url,window.location.href).href;
                 // Embedded screen layout only; standalone/print styles stay unchanged.
                 const embeddedStyle = parsed.createElement("style");
@@ -298,30 +328,39 @@
         document.addEventListener("visibilitychange",() => {
             if (document.hidden) manager.suspend(); else manager.resume();
         });
+        window.addEventListener("beforeunload",event => {
+            if (report?.draft?.hasPending()) { event.preventDefault(); event.returnValue = ""; }
+        });
+        window.addEventListener("online",() => { if (report && !report.invalidated) void manager.resume(); });
         window.addEventListener("pagehide",() => manager.leave());
         window.addEventListener("pageshow",async () => {
             await manager.resume();
             if (report && manager.snapshot().pointId !== report.id) {
                 // BFCache must not restore a form tied to an ended acquisition.
-                report.closing = true; report.observer?.disconnect();
-                report.dialog.close(); report.dialog.remove(); report = null;
+                if (report.draft?.hasPending()) {
+                    report.invalidated = true; report.draft.stop();
+                    reportControls(report.frame.contentDocument,false);
+                } else {
+                    report.closing = true; report.draft?.destroy(); report.observer?.disconnect();
+                    report.dialog.close(); report.dialog.remove(); report = null;
+                }
             }
             bindings.forEach(update);
         });
         // Navigation/logout are blocked while a server operation may still be running.
         document.addEventListener("submit",event => {
             if (event.target.closest(".leaflet-popup")) return;
-            if (manager.snapshot().busy) {
+            if (report?.draft?.hasPending() || manager.snapshot().busy) {
                 event.preventDefault(); event.stopImmediatePropagation();
-                notify("Aguarde a operação em andamento antes de sair.");
+                notify("Conclua as operações ou encerre o relatório resolvendo as alterações pendentes antes de sair.");
             } else manager.leave();
         },true);
         document.addEventListener("click",event => {
             const link = event.target.closest("a");
             if (!link || link.closest(".leaflet-popup") || link.target === "_blank" || link.getAttribute("href")?.startsWith("#")) return;
-            if (manager.snapshot().busy) {
+            if (report?.draft?.hasPending() || manager.snapshot().busy) {
                 event.preventDefault(); event.stopImmediatePropagation();
-                notify("Aguarde a operação em andamento antes de sair.");
+                notify("Conclua as operações ou encerre o relatório resolvendo as alterações pendentes antes de sair.");
             } else manager.leave();
         },true);
         function isOpen(id) {
@@ -330,8 +369,13 @@
         function invalidate(id) {
             manager.invalidate(id);
             if (report?.id === id) {
-                report.closing = true; report.observer?.disconnect();
-                report.dialog.close(); report.dialog.remove(); report = null;
+                if (report.draft?.hasPending()) {
+                    report.invalidated = true; report.draft.stop();
+                    reportControls(report.frame.contentDocument,false);
+                } else {
+                    report.closing = true; report.draft?.destroy(); report.observer?.disconnect();
+                    report.dialog.close(); report.dialog.remove(); report = null;
+                }
             }
             if (current?.point.id === id) current = null;
             notify("Este waypoint foi excluído. Os detalhes foram encerrados.");

@@ -259,3 +259,12 @@ test("PGT bridge preserves reservation-specific errors without removing manual e
     assert.match(ui.notice.textContent,/reserva expirou/);
     assert.deepEqual(ui.values(),["Manual"]);
 });
+
+
+test("manual removal and automatic PGT suggestions notify the draft bridge",async t=>{
+    mockSearch(t,["Escola"]);const ui=page();let changes=0;
+    ui.form.ownerDocument.defaultView.waypointDraftChanged=()=>changes++;
+    ui.add.click();assert.equal(changes,1);
+    ui.remove(0);assert.equal(changes,2);
+    await ui.search.click();assert.ok(changes>2);assert.deepEqual(ui.values(),["Escola"]);
+});

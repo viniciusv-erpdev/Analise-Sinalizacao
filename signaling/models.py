@@ -1,4 +1,4 @@
-from django.core.validators import MaxValueValidator, MinValueValidator
+from django.core.validators import MaxLengthValidator, MaxValueValidator, MinValueValidator
 from django.db import models
 from django.conf import settings
 
@@ -198,3 +198,42 @@ class WaypointReservation(models.Model):
 
     def __str__(self):
         return f"Reservation for waypoint {self.signaling_point_id}"
+
+
+class WaypointReportDraft(models.Model):
+    """Shared editable text only. Writes must use the reservation-aware service."""
+    signaling_point = models.OneToOneField(
+        SignalingPoint, on_delete=models.CASCADE, related_name="report_draft",
+    )
+    functional_classification = models.CharField(max_length=500, blank=True, default="")
+    geometric_configuration = models.CharField(max_length=500, blank=True, default="")
+    regulated_speed = models.CharField(max_length=100, blank=True, default="")
+    inspection_address = models.CharField(max_length=300, blank=True, default="")
+    occurrence_date = models.DateField(null=True, blank=True)
+    inspection_date = models.DateField(null=True, blank=True)
+    study_reason = models.TextField(
+        max_length=2000, blank=True, default="", validators=[MaxLengthValidator(2000)],
+    )
+    study_objective = models.TextField(
+        max_length=2000, blank=True, default="", validators=[MaxLengthValidator(2000)],
+    )
+    inspector_name = models.CharField(max_length=200, blank=True, default="")
+    pgts = models.JSONField(default=list, blank=True)
+    revision = models.PositiveBigIntegerField(default=1, editable=False)
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
+        null=True, blank=True, editable=False,
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        default_permissions = ()  # Access follows the existing waypoint/report policy.
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(revision__gt=0), name="report_draft_revision_positive",
+            ),
+        ]
+
+    def __str__(self):
+        return f"Report draft for waypoint {self.signaling_point_id}"

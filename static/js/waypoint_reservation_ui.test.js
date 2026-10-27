@@ -52,7 +52,7 @@ function fixture({change=true,occupied=false}={}) {
     function bind(){const old=global.MutationObserver;global.MutationObserver=class{observe(){}disconnect(){}};
         try{ui.bind(marker,point);}finally{global.MutationObserver=old;}}
     return {ui,manager,point,marker,write,read,root,calls,emit,events,windows,intervals,bind,
-        get renders(){return renderCount;},body};
+        get renders(){return renderCount;},body,window,document};
 }
 test("popup stays read-only until acquisition and refresh complete; loss disables mutations only",async()=>{
     const f=fixture();f.bind();assert.equal(f.write.disabled,true);assert.equal(f.read.disabled,false);
@@ -247,4 +247,97 @@ test("BFCache restoration dismisses a report tied to an ended acquisition and dr
     assert.equal(f.write.disabled,true);
     assert.equal(f.root.children[0].children[1].hidden,false);
     assert.equal(f.calls.filter(call=>call[0]==="acquire").length,1);
+});
+
+
+function draftUI(t) {
+    const f=fixture(),dom=reportDOM(t,f);
+    const draft={pending:true,stops:0,destroyed:false,attached:0,flushes:0,
+        hasPending(){return this.pending;},
+        async flush(){this.flushes++;return false;},
+        stop(){this.stops++;},pause(){},resume(){},
+        destroy(){this.destroyed=true;},attach(){this.attached++;},
+    };
+    f.window.ReportDraft={mount:()=>draft};
+    f.manager.perform=async(_id,_url,_options,consume)=>consume({ok:true,text:async()=>"<html>report</html>"});
+    return {f,dom,draft,async open(){
+        const perform=f.manager.perform;f.manager.perform=async()=>[{id:7,status:"OK"}];
+        await f.ui.begin(f.marker,f.point);f.manager.perform=perform;
+        await f.ui.openReport(7,"/signaling/points/7/report/");
+        return dom.attach();
+    }};
+}
+test("closing an unsaved report permits cancel; discard requires explicit confirmation",async t=>{
+    const {f,draft,open}=draftUI(t),{dialog}=await open();
+    const close=dialog.children[0].onclick();await Promise.resolve();await Promise.resolve();
+    assert.equal(draft.flushes,1);assert.equal(dialog.removed,undefined);
+    const confirmation=f.body.children.at(-1);assert.notEqual(confirmation,dialog);
+    confirmation.children[2].onclick();await close;
+    assert.equal(dialog.removed,undefined);assert.equal(draft.destroyed,false);
+    const discard=dialog.children[0].onclick();await Promise.resolve();await Promise.resolve();
+    f.body.children.at(-1).children[1].onclick();await discard;
+    assert.equal(dialog.removed,true);assert.equal(draft.destroyed,true);
+});
+test("successful flush closes the report without a discard dialog",async t=>{
+    const {f,draft,open}=draftUI(t),{dialog}=await open();
+    draft.flush=async()=>{draft.pending=false;return true;};
+    await dialog.children[0].onclick();
+    assert.equal(dialog.removed,true);assert.equal(f.body.children.length,1);
+});
+for (const state of ["lost","closing","acquiring"]) test("reservation "+state+" retains unsaved report for copy",async t=>{
+    const {f,draft,open}=draftUI(t),{dialog}=await open();
+    f.emit({state});assert.ok(draft.stops>0);assert.equal(dialog.removed,undefined);
+    let prevented=false;f.windows.beforeunload({preventDefault(){prevented=true;}});
+    assert.equal(prevented,true);assert.equal(draft.destroyed,false);
+});
+test("switching reservation to another waypoint stops the old form",async t=>{
+    const {f,draft,open}=draftUI(t),{dialog}=await open();
+    f.emit({pointId:8,state:"active"});assert.ok(draft.stops>0);
+    assert.equal(dialog.removed,undefined);
+});
+test("DOCX waits for pending autosave and uses the same report POST",async t=>{
+    const {f,dom,draft,open}=draftUI(t);await open();const order=[];
+    draft.flush=async()=>{order.push("draft");draft.pending=false;};
+    f.manager.perform=async(_id,url,options,consume)=>{
+        order.push(options.method+":"+url);
+        return consume({ok:true,headers:{get:()=>"text/html"},text:async()=>"<html>validation</html>"});
+    };
+    const form={dataset:{},matches:()=>true};
+    await dom.events.submit({target:form,preventDefault(){}});
+    assert.deepEqual(order,["draft","POST:/signaling/points/7/report/"]);
+    dom.attach();assert.equal(draft.attached,1);
+});
+
+
+test("BFCache and remote deletion retain unsaved report instead of destroying it",async t=>{
+    const {f,draft,open}=draftUI(t),{dialog}=await open();
+    f.manager.leave=()=>f.emit({pointId:null,state:"idle"});
+    f.windows.pagehide();await f.windows.pageshow();
+    assert.equal(dialog.removed,undefined);assert.equal(draft.destroyed,false);
+    f.manager.invalidate=()=>f.emit({pointId:null,state:"idle"});
+    f.ui.invalidate(7);
+    assert.equal(dialog.removed,undefined);assert.equal(draft.destroyed,false);
+});
+test("outer navigation cannot silently discard unsaved form",async t=>{
+    const {f,open}=draftUI(t);await open();let prevented=false;
+    const link={target:"",closest:()=>null,getAttribute:()=>"/other/"};
+    f.events.click({target:{closest:()=>link},preventDefault(){prevented=true;},stopImmediatePropagation(){}});
+    assert.equal(prevented,true);assert.equal(f.calls.some(item=>item[0]==="leave"),false);
+});
+
+
+test("a DOCX error page without a form must not replace unsaved local fields",async t=>{
+    const {f,dom,open}=draftUI(t),{frame,dialog}=await open();
+    const original=frame.srcdoc;
+    global.DOMParser=class{parseFromString(){return {querySelector:()=>null};}};
+    f.manager.perform=async(_id,_url,_options,consume)=>consume({ok:true,
+        headers:{get:()=>"text/html"},text:async()=>"<html>filter error</html>"});
+    await dom.events.submit({target:{dataset:{},matches:()=>true},preventDefault(){}});
+    assert.equal(frame.srcdoc,original);assert.match(dialog.children[1].textContent,/textos foram mantidos/);
+});
+test("lost reservation leaves text selectable in read-only fields",async t=>{
+    const {f,open}=draftUI(t),{frame}=await open();const text={readOnly:false,value:"Local"};
+    frame.contentDocument.querySelectorAll=selector=>selector.includes("textarea")?[text]:[];
+    f.emit({state:"lost"});
+    assert.equal(text.readOnly,true);assert.equal(text.disabled,undefined);assert.equal(text.value,"Local");
 });

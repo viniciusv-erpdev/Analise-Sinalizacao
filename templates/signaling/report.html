@@ -91,7 +91,11 @@
                 </p>
             </div>
         {% else %}
-            <form method="post" enctype="multipart/form-data" data-waypoint-report-form novalidate>
+            <form method="post" enctype="multipart/form-data" data-waypoint-report-form data-draft-url="{% url 'signaling:report-draft' point.id %}" novalidate>
+                <p class="small text-secondary mb-3" role="status" aria-live="polite">
+                    <span data-draft-status>Carregando rascunho…</span>
+                    <button type="button" class="btn btn-link btn-sm p-0" data-draft-retry hidden>Tentar novamente</button>
+                </p>
                 {% csrf_token %}
                 {% if form.non_field_errors %}
                     <div class="alert alert-danger" role="alert">

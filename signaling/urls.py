@@ -1,11 +1,12 @@
 from django.urls import path
 
-from signaling import views, reservation_views, synchronization_views
+from signaling import views, reservation_views, synchronization_views, report_draft_views
 
 
 app_name = "signaling"
 
 urlpatterns = [
+    path("points/<int:point_id>/report-draft/", report_draft_views.report_draft, name="report-draft"),
     path("points/sync/", synchronization_views.synchronize, name="synchronize-points"),
     path("points/<int:point_id>/reservation/", reservation_views.status, name="reservation-status"),
     path("points/<int:point_id>/reservation/acquire/", reservation_views.acquire, name="acquire-reservation"),

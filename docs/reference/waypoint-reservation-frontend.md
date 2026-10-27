@@ -42,8 +42,9 @@ Durante uso normal não há controles manuais de reserva. Avisos discretos e
 A aquisição ao abrir e a liberação ao fechar continuam automáticas.
 
 Fechar o popup ou trocar de waypoint invalida a interação local.
-Voltar/cancelar um painel interno descarta apenas seu rascunho, preservando a
-aquisição enquanto os detalhes do waypoint continuarem abertos.
+Voltar/cancelar um painel interno preserva a aquisição enquanto os detalhes do
+waypoint continuarem abertos. No relatório, o fechamento tenta salvar e exige
+confirmação explícita se houver textos ainda não salvos.
 Operações já enviadas mantêm heartbeat até terminar o recebimento do corpo; seus
 resultados são descartados se a interação tiver sido encerrada. Só então ocorre
 a liberação. Uma gravação enviada pode já ter sido confirmada pelo servidor:
@@ -322,3 +323,13 @@ Executar os comandos PostgreSQL documentados acima no terminal local.
 Os testes JavaScript não demonstram exclusividade transacional nem substituem
 homologação real de bfcache em navegador. Nenhum arquivo de backend, migration,
 serviço PostgreSQL ou infraestrutura foi alterado nesta correção.
+
+
+## Rascunho do relatório
+
+O formulário usa `report_draft.js`, montado pelo controlador do iframe. O autosave
+reutiliza `manager.perform` e a assinatura existente de estados de reserva; não
+acrescenta polling ou heartbeat. Conflito de revisão do rascunho não equivale a
+perda de reserva. A perda real invalida o autosave e conserva o formulário para
+consulta/cópia, sem autorizar sua reutilização numa nova aquisição.
+Contrato, recuperação e limites: [signaling-and-reports.md](signaling-and-reports.md).

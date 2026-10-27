@@ -2,6 +2,7 @@
 require("./waypoint_reservations.test.js");
 require("./waypoint_reservation_ui.test.js");
 require("./waypoint_sync.test.js");
+require("./report_draft.test.js");
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
