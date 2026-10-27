@@ -193,7 +193,8 @@ de autorização/reserva. Respostas são privadas e no-store. A permissão de re
 O rascunho é removido com o waypoint; exclusão do autor preserva os textos e torna
 `updated_by` nulo. Não há histórico de revisões. A geração DOCX permanece
 independente do rascunho; a integração do formulário está descrita abaixo.
-O campo futuro de considerações finais ainda não integra este contrato.
+`technical_analysis` integra o contrato: texto opcional de até 10.000 caracteres,
+com quebras de linha preservadas e validação dos caracteres aceitos no DOCX.
 
 Testes: `signaling.test_report_drafts` e `signaling.test_report_draft_concurrency`.
 O segundo exige PostgreSQL real e é ignorado em SQLite; os testes funcionais em
@@ -226,3 +227,23 @@ O download continua multipart na rota original e pode usar os valores locais
 mesmo em conflito de rascunho, desde que a reserva permaneça válida.
 Testes JS: `report_draft.test.js`, controles do iframe, reservas e caracterização;
 a nova suíte é importada pela entrada `intersection_problems.test.js` já usada na CI.
+
+
+## Identificação e análise técnica no DOCX
+
+O formulário e o documento usam o título “Relatório Técnico de Segurança Viária”.
+A análise técnica fica após as fotos e participa do mesmo rascunho/autosave,
+com revisão e reservas existentes. A migration aditiva
+`0011_report_draft_technical_analysis` acrescenta texto vazio aos rascunhos antigos,
+sem alterar seus demais campos, revisão ou timestamps. Não é aplicada pelo fluxo HTTP.
+
+O DOCX termina com a análise técnica (ou “Não informado”) e o registro de autoria.
+A view fornece exclusivamente `request.user` ao gerador; nome completo e username
+identificam o autor, usando apenas username quando o nome está vazio. O responsável
+pela vistoria continua sendo um campo separado. A emissão vem de um único instante
+do relógio do servidor, convertido pelo timezone Django; o mesmo instante determina
+a data de geração no documento. A configuração atual continua em UTC.
+Esse registro não constitui assinatura digital ou certificação jurídica.
+
+O endpoint continua gerando DOCX em memória, com os dados atuais do formulário;
+não há PDF, numeração oficial ou armazenamento de documentos finalizados.

@@ -2,6 +2,7 @@ from django.core.validators import MaxLengthValidator, MaxValueValidator, MinVal
 from django.db import models
 from django.conf import settings
 
+from signaling.characterization import MAX_TECHNICAL_ANALYSIS_LENGTH, validate_report_text
 from signaling.intersection_problems import problem_solution_codes, validate_problem_solution
 
 
@@ -218,6 +219,10 @@ class WaypointReportDraft(models.Model):
         max_length=2000, blank=True, default="", validators=[MaxLengthValidator(2000)],
     )
     inspector_name = models.CharField(max_length=200, blank=True, default="")
+    technical_analysis = models.TextField(
+        max_length=MAX_TECHNICAL_ANALYSIS_LENGTH, blank=True, default="",
+        validators=[MaxLengthValidator(MAX_TECHNICAL_ANALYSIS_LENGTH), validate_report_text],
+    )
     pgts = models.JSONField(default=list, blank=True)
     revision = models.PositiveBigIntegerField(default=1, editable=False)
     updated_by = models.ForeignKey(

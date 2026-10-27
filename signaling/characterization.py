@@ -5,6 +5,7 @@ import re
 from django.core.exceptions import ValidationError
 
 
+MAX_TECHNICAL_ANALYSIS_LENGTH = 10000
 MAX_PGT_ITEMS = 50
 MAX_PGT_LENGTH = 300
 INVALID_XML_CHARACTERS = re.compile(

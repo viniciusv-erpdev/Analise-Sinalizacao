@@ -29,7 +29,7 @@ DOCX_CONTENT_TYPE = (
 class SignalingReportDownloadTests(ReservationFunctionalTestMixin, TestCase):
     def setUp(self):
         super().setUp()
-        authorize(self.client, ("view_signalingpoint", "generate_signaling_report"))
+        self.user = authorize(self.client, ("view_signalingpoint", "generate_signaling_report"))
         self.point = SignalingPoint.objects.create(
             latitude=0,
             longitude=0,
@@ -526,3 +526,42 @@ class SignalingReportDownloadTests(ReservationFunctionalTestMixin, TestCase):
             original_point,
         )
         self.assertEqual(intervention.notes, "Original")
+
+
+    def test_technical_analysis_and_title_are_at_the_end_of_the_form(self):
+        self.set_individual_analysis()
+        response = self.client.get(self.url)
+        self.assertContains(response, "Relatório Técnico de Segurança Viária")
+        self.assertContains(response, 'name="technical_analysis"')
+        self.assertContains(response, 'maxlength="10000"')
+        html = response.content.decode()
+        self.assertGreater(html.index('name="technical_analysis"'), html.index('name="photos"'))
+        self.assertLess(html.index('name="technical_analysis"'), html.index("Gerar relatório Word"))
+
+    def test_technical_analysis_and_backend_author_reach_actual_docx(self):
+        self.set_individual_analysis()
+        self.user.first_name = "Joana"
+        self.user.last_name = "Santos"
+        self.user.save()
+        data = self.valid_form_data()
+        data.update({"technical_analysis": "Considerações finais.\nMelhorar a visibilidade.",
+                     "author": "AUTOR FORJADO", "issued_at": "DATA FORJADA", "user_id": "999999"})
+        response = self.client.post(self.url, data)
+        self.assertEqual(response.status_code, 200)
+        document = Document(BytesIO(self.response_bytes(response)))
+        paragraphs = [paragraph.text for paragraph in document.paragraphs]
+        text = "\n".join(paragraphs)
+        self.assertIn(data["technical_analysis"], text)
+        self.assertIn(f"Autor da geração: Joana Santos ({self.user.username})", text)
+        self.assertNotIn("AUTOR FORJADO", text)
+        self.assertNotIn("DATA FORJADA", text)
+        self.assertTrue(paragraphs[-1].startswith("Data de emissão:"))
+
+    def test_technical_analysis_validation_preserves_values_without_generating_docx(self):
+        self.set_individual_analysis()
+        for value in ("x"*10001, "Inválido\x00XML"):
+            with self.subTest(size=len(value)), patch("signaling.views.generate_signaling_report") as generator:
+                response = self.client.post(self.url, {**self.valid_form_data(), "technical_analysis": value})
+                self.assertEqual(response.status_code, 200)
+                self.assertIn("technical_analysis", response.context["form"].errors)
+                generator.assert_not_called()

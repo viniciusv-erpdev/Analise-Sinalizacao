@@ -93,6 +93,7 @@ def point_report(request: HttpRequest, point_id: int):
                 survey,
                 form.cleaned_data,
                 form.cleaned_data["photos"],
+                author=request.user,
             )
         except InvalidReportImage as error:
             form.add_error("photos", str(error))

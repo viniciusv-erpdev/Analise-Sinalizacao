@@ -14,7 +14,7 @@ from signaling import reservations
 
 TEXT_FIELDS = (
     "functional_classification", "geometric_configuration", "regulated_speed",
-    "inspection_address", "study_reason", "study_objective", "inspector_name",
+    "inspection_address", "study_reason", "study_objective", "inspector_name", "technical_analysis",
 )
 DATE_FIELDS = ("occurrence_date", "inspection_date")
 DRAFT_FIELDS = (*TEXT_FIELDS, *DATE_FIELDS, "pgts")

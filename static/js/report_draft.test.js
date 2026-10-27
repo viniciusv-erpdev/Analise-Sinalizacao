@@ -223,3 +223,28 @@ test("lost acknowledgement plus an in-flight reversal must not discard the local
     await f.fire();assert.deepEqual(f.calls.at(-1).body,{expected_revision:1,fields:{study_reason:""}});
     assert.equal(f.remote.fields.study_reason,"");assert.equal(f.draft.hasPending(),false);
 });
+
+
+test("technical analysis loads and autosaves alone with expected revision",async()=>{
+    const f=fixture();f.remote=data({technical_analysis:"Análise anterior"},3);await f.draft.load();
+    assert.equal(f.draft.values().technical_analysis,"Análise anterior");
+    f.edit({technical_analysis:"Análise técnica.\nConsiderações finais."});await f.fire();
+    assert.deepEqual(f.calls[1].body,{expected_revision:3,fields:{technical_analysis:"Análise técnica.\nConsiderações finais."}});
+    assert.equal(f.draft.snapshot().revision,4);assert.equal(f.draft.hasPending(),false);
+});
+test("technical analysis conflict keeps local multiline text without retry writes",async()=>{
+    const f=fixture();await f.draft.load();
+    f.handler=async()=>{throw Object.assign(new Error("Conflito"),{code:"draft_revision_conflict",status:409});};
+    f.edit({technical_analysis:"Texto local\nSegunda linha"});await f.fire();await f.draft.flush();
+    assert.equal(f.draft.snapshot().state,"conflict");
+    assert.equal(f.draft.values().technical_analysis,"Texto local\nSegunda linha");
+    assert.equal(f.calls.length,2);
+});
+test("technical analysis validation error retains text until corrected",async()=>{
+    const f=fixture();await f.draft.load();
+    f.handler=async()=>{throw Object.assign(new Error("Limite excedido"),{code:"invalid_draft_fields",status:400});};
+    f.edit({technical_analysis:"x".repeat(10001)});await f.fire();
+    assert.equal(f.draft.snapshot().state,"error");assert.equal(f.draft.values().technical_analysis.length,10001);
+    f.handler=null;f.edit({technical_analysis:"Corrigido"});await f.fire();await f.fire();
+    assert.equal(f.remote.fields.technical_analysis,"Corrigido");assert.equal(f.draft.hasPending(),false);
+});

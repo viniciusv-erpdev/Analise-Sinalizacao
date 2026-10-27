@@ -7,7 +7,7 @@
     "use strict";
     const fields = ["functional_classification", "geometric_configuration", "regulated_speed",
         "inspection_address", "occurrence_date", "inspection_date", "study_reason",
-        "study_objective", "inspector_name", "pgts"];
+        "study_objective", "inspector_name", "technical_analysis", "pgts"];
     const dates = new Set(["occurrence_date", "inspection_date"]);
     const copy = value => JSON.parse(JSON.stringify(value));
     const equal = (a,b) => JSON.stringify(a) === JSON.stringify(b);

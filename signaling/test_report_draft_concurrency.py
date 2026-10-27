@@ -28,7 +28,7 @@ class ReportDraftConcurrencyTests(TransactionTestCase):
         client = Client()
         client.cookies[settings.SESSION_COOKIE_NAME] = self.identity.session_key
         return client.post(reverse("signaling:report-draft", args=[self.point.pk]),
-            {"expected_revision": revision, "fields": {"study_reason": text}},
+            {"expected_revision": revision, "fields": {"study_reason": text, "technical_analysis": text}},
             content_type="application/json",
             HTTP_X_WAYPOINT_TOKEN=grant.credentials.token,
             HTTP_X_WAYPOINT_INTERACTION=str(grant.credentials.interaction_id),
@@ -43,6 +43,7 @@ class ReportDraftConcurrencyTests(TransactionTestCase):
         draft = WaypointReportDraft.objects.get(signaling_point=self.point)
         self.assertEqual(draft.revision, revision)
         self.assertEqual(draft.study_reason, winner.json()["fields"]["study_reason"])
+        self.assertEqual(draft.technical_analysis, winner.json()["fields"]["technical_analysis"])
         self.assertEqual(WaypointReportDraft.objects.count(), 1)
 
     def test_concurrent_first_saves_create_one_draft(self):
@@ -72,6 +73,7 @@ class ReportDraftConcurrencyTests(TransactionTestCase):
         self.assertEqual(response.json()["code"], "reservation_generation_stale")
         draft = WaypointReportDraft.objects.get(signaling_point=self.point)
         self.assertEqual(draft.study_reason, "Inicial")
+        self.assertEqual(draft.technical_analysis, "Inicial")
         self.assertEqual(draft.revision, 1)
 
     def test_reservation_expiration_is_checked_after_waiting_for_lock(self):

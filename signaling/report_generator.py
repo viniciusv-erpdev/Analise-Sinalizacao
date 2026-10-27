@@ -122,19 +122,27 @@ def generate_signaling_report(
     survey: Mapping[str, object],
     form_data: Mapping[str, object] | None = None,
     photos: Iterable[BinaryIO] = (),
+    *,
+    author,
 ) -> BytesIO:
     """Retorna um DOCX em memória sem persistir formulário, fotos ou arquivo."""
+    if not author.is_authenticated:
+        raise ValueError("A geração exige um autor autenticado.")
+    full_name = author.get_full_name().strip()
+    username = author.get_username()
+    author_label = f"{full_name} ({username})" if full_name else username
+    issued_at = timezone.localtime(timezone.now())
     temporary_data = form_data or {}
     document = Document()
     configure_document_styles(document)
     _add_header(document)
     _add_footer(document)
-    document.add_heading("Relatório do local", level=0)
+    document.add_heading("Relatório Técnico de Segurança Viária", level=0)
 
     document.add_heading("Informações do estudo", level=1)
     _add_information_table(document, (
         ("Endereço da vistoria", _display_value(temporary_data.get("inspection_address"))),
-        ("Data de geração do relatório", timezone.localdate().strftime("%d/%m/%Y")),
+        ("Data de geração do relatório", issued_at.strftime("%d/%m/%Y")),
         ("Data de ocorrência", _display_value(temporary_data.get("occurrence_date"))),
         ("Data da vistoria", _display_value(temporary_data.get("inspection_date"))),
         ("Motivo do estudo", _display_value(temporary_data.get("study_reason"))),
@@ -224,6 +232,13 @@ def generate_signaling_report(
         _add_photos_grid(document, photo_buffers)
     else:
         document.add_paragraph("Nenhuma foto informada.")
+
+    document.add_heading("Análise técnica e considerações finais", level=1)
+    document.add_paragraph(_display_value(temporary_data.get("technical_analysis")))
+
+    document.add_heading("Autoria", level=1)
+    document.add_paragraph(f"Autor da geração: {author_label}")
+    document.add_paragraph("Data de emissão: " + issued_at.strftime("%d/%m/%Y às %H:%M:%S %Z (%z)"))
 
     report_buffer = BytesIO()
     document.save(report_buffer)

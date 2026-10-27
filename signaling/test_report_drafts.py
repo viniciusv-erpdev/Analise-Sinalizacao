@@ -272,6 +272,32 @@ class ReportDraftTests(TestCase):
         self.assertFalse(WaypointReportDraft.objects.exists())
 
 
+    def test_technical_analysis_persists_recovers_and_uses_revision(self):
+        text = "Análise técnica.\n\nConsiderações finais: atenção à travessia."
+        response = self.save({"technical_analysis": text})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["revision"], 1)
+        self.assertEqual(self.client.get(self.url).json()["fields"]["technical_analysis"], text)
+        other = Client()
+        authorize(other)
+        self.assertEqual(other.get(self.url).json()["fields"]["technical_analysis"], text)
+        conflict = self.save({"technical_analysis": "Obsoleto"}, revision=0)
+        self.assertEqual(conflict.status_code, 409)
+        self.assertEqual(self.client.get(self.url).json()["fields"]["technical_analysis"], text)
+        self.assertEqual(self.save({"technical_analysis": ""}, revision=1).json()["revision"], 2)
+        self.assertEqual(self.client.get(self.url).json()["fields"]["technical_analysis"], "")
+
+    def test_technical_analysis_limits_types_and_control_characters(self):
+        self.assertEqual(self.save({"technical_analysis": "x"*10000}).status_code, 200)
+        for value in ("x"*10001, "Inválido\x01XML", None, ["Texto"], 123):
+            with self.subTest(value_type=type(value).__name__):
+                response = self.save({"technical_analysis": value}, revision=1)
+                self.assertEqual(response.status_code, 400)
+        draft = WaypointReportDraft.objects.get(signaling_point=self.point)
+        self.assertEqual(draft.revision, 1)
+        self.assertEqual(draft.technical_analysis, "x"*10000)
+
+
 class ReportDraftMigrationTests(TransactionTestCase):
     def test_additive_migration_preserves_waypoint_generation_and_children(self):
         before = ("signaling", "0009_waypoint_reservation")
@@ -298,6 +324,33 @@ class ReportDraftMigrationTests(TransactionTestCase):
             self.assertEqual(draft.revision, 1)
             self.assertEqual(draft.pgts, [])
             self.assertIsNone(draft.inspection_date)
+        finally:
+            executor = MigrationExecutor(connection)
+            executor.migrate(executor.loader.graph.leaf_nodes())
+
+
+    def test_technical_analysis_migration_preserves_existing_draft_and_revision(self):
+        before = ("signaling", "0010_waypoint_report_draft")
+        after = ("signaling", "0011_report_draft_technical_analysis")
+        try:
+            executor = MigrationExecutor(connection)
+            executor.migrate([before])
+            apps = executor.loader.project_state([before]).apps
+            point = apps.get_model("signaling", "SignalingPoint").objects.create(
+                latitude=0, longitude=0, status="OK", reservation_generation=9)
+            draft = apps.get_model("signaling", "WaypointReportDraft").objects.create(
+                signaling_point=point, revision=4, study_reason="Preservado", pgts=["Escola"])
+            executor = MigrationExecutor(connection)
+            executor.migrate([after])
+            apps = executor.loader.project_state([after]).apps
+            restored = apps.get_model("signaling", "WaypointReportDraft").objects.get(pk=draft.pk)
+            self.assertEqual(restored.technical_analysis, "")
+            self.assertEqual(restored.revision, 4)
+            self.assertEqual(restored.study_reason, "Preservado")
+            self.assertEqual(restored.pgts, ["Escola"])
+            self.assertEqual(restored.created_at, draft.created_at)
+            self.assertEqual(restored.updated_at, draft.updated_at)
+            self.assertEqual(restored.signaling_point.reservation_generation, 9)
         finally:
             executor = MigrationExecutor(connection)
             executor.migrate(executor.loader.graph.leaf_nodes())

@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Relatório do local</title>
+    <title>Relatório Técnico de Segurança Viária</title>
     <link
         rel="stylesheet"
         href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css"
@@ -76,7 +76,7 @@
             href="{% url 'analysis' %}"
         >← Voltar ao mapa</a>
 
-        <h1 class="h3 mb-4">Relatório do local</h1>
+        <h1 class="h3 mb-4">Relatório Técnico de Segurança Viária</h1>
 
         {% if filter_error %}
             <div class="alert alert-danger" role="alert">
@@ -377,6 +377,18 @@
                             Em caso de erro, selecione os arquivos novamente.
                         </div>
                         {% for error in form.photos.errors %}
+                            <div class="invalid-feedback d-block">{{ error }}</div>
+                        {% endfor %}
+                    </div>
+                </section>
+
+                <section class="card shadow-sm mb-3">
+                    <div class="card-body">
+                        <label class="h5 card-title d-block" for="{{ form.technical_analysis.id_for_label }}">
+                            {{ form.technical_analysis.label }}
+                        </label>
+                        {{ form.technical_analysis }}
+                        {% for error in form.technical_analysis.errors %}
                             <div class="invalid-feedback d-block">{{ error }}</div>
                         {% endfor %}
                     </div>
