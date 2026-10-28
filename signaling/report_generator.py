@@ -124,6 +124,8 @@ def generate_signaling_report(
     photos: Iterable[BinaryIO] = (),
     *,
     author,
+    issued_at=None,
+    official_number=None,
 ) -> BytesIO:
     """Retorna um DOCX em memória sem persistir formulário, fotos ou arquivo."""
     if not author.is_authenticated:
@@ -131,12 +133,14 @@ def generate_signaling_report(
     full_name = author.get_full_name().strip()
     username = author.get_username()
     author_label = f"{full_name} ({username})" if full_name else username
-    issued_at = timezone.localtime(timezone.now())
+    issued_at = issued_at if issued_at is not None else timezone.localtime(timezone.now())
     temporary_data = form_data or {}
     document = Document()
     configure_document_styles(document)
     _add_header(document)
     _add_footer(document)
+    if official_number:
+        document.add_paragraph(official_number)
     document.add_heading("Relatório Técnico de Segurança Viária", level=0)
 
     document.add_heading("Informações do estudo", level=1)

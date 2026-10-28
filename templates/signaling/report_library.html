@@ -1,0 +1,64 @@
+{% load static tz %}
+<!doctype html>
+<html lang="pt-BR">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Relat&#243;rios oficiais - An&#225;lise de Sinaliza&#231;&#227;o</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css"
+          integrity="sha384-sRIl4kxILFvY47J16cr9ZwB07vP4J8+LH7qKQnuqkuIAvNWLzeN8tE5YBujZqJLB" crossorigin="anonymous">
+    <link rel="stylesheet" href="{% static 'css/app-shell.css' %}">
+    <link rel="stylesheet" href="{% static 'css/report-library.css' %}">
+    {% include "includes/favicon.html" %}
+</head>
+<body class="app-shell report-library-page">
+    {% include "includes/navbar.html" %}
+    <main class="report-library" id="main-content">
+        <header class="report-library__heading">
+            <div><h1>Relat&#243;rios oficiais</h1><p>Consulte os relat&#243;rios publicados e sua vers&#227;o oficial mais recente.</p></div>
+            <a class="report-library__back" href="{% url 'analysis' %}"><span aria-hidden="true">&#8592;</span> Voltar ao mapa</a>
+        </header>
+        <form method="get" class="report-library__filters" aria-label="Filtrar relat&#243;rios">
+            {% if filters.non_field_errors %}<div class="report-library__errors" role="alert">{{ filters.non_field_errors }}</div>{% endif %}
+            {% for field in filters %}
+                <div class="report-library__field">
+                    {{ field.label_tag }}{{ field }}
+                    {% if field.errors %}<div class="report-library__errors" role="alert">{{ field.errors }}</div>{% endif %}
+                </div>
+            {% endfor %}
+            <div class="report-library__filter-actions"><button type="submit">Filtrar</button><a href="{% url 'signaling:report-library' %}">Limpar filtros</a></div>
+        </form>
+        {% if filters_valid %}
+            <p role="status">{{ page_obj.paginator.count }} relat&#243;rio{{ page_obj.paginator.count|pluralize }} encontrado{{ page_obj.paginator.count|pluralize }}.</p>
+            <div class="report-library__table" tabindex="0" role="region" aria-label="Relat&#243;rios publicados">
+                <table>
+                    <caption class="visually-hidden">Relat&#243;rios oficiais publicados</caption>
+                    <thead><tr><th scope="col">N&#250;mero oficial</th><th scope="col">Emiss&#227;o (S&#227;o Paulo)</th><th scope="col">Autor hist&#243;rico</th><th scope="col">Waypoint hist&#243;rico</th><th scope="col">Vers&#227;o</th></tr></thead>
+                    <tbody>
+                    {% for row in page_obj %}
+                        <tr>
+                            <td><a href="{% url 'signaling:report-detail' row.pk %}">{{ row.official_number }}</a></td>
+                            <td>{% timezone "America/Sao_Paulo" %}{{ row.published_issued_at|date:"d/m/Y H:i" }}{% endtimezone %}</td>
+                            <td>{{ row.historical_author.username|default:row.historical_author.full_name|default:"Não informado" }}</td>
+                            <td>{{ row.waypoint_history.id|default:"Não informado" }}</td>
+                            <td>{{ row.published_version }}</td>
+                        </tr>
+                    {% empty %}
+                        <tr><td colspan="5">Nenhum relat&#243;rio oficial encontrado.</td></tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% if page_obj.paginator.num_pages > 1 %}
+                <nav class="report-library__pagination" aria-label="P&#225;ginas de relat&#243;rios">
+                    {% if page_obj.has_previous %}<a rel="prev" href="?{% if filter_query %}{{ filter_query }}&amp;{% endif %}page={{ page_obj.previous_page_number }}">Anterior</a>{% endif %}
+                    <span aria-current="page">P&#225;gina {{ page_obj.number }} de {{ page_obj.paginator.num_pages }}</span>
+                    {% if page_obj.has_next %}<a rel="next" href="?{% if filter_query %}{{ filter_query }}&amp;{% endif %}page={{ page_obj.next_page_number }}">Pr&#243;xima</a>{% endif %}
+                </nav>
+            {% endif %}
+        {% else %}
+            <p role="status">Revise os filtros informados para consultar os relat&#243;rios.</p>
+        {% endif %}
+    </main>
+</body>
+</html>

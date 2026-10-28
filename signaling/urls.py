@@ -1,11 +1,21 @@
 from django.urls import path
+from signaling.report_artifact_views import report_artifact
 
+from signaling import report_finalization_views as finalization
+from signaling.report_library_views import report_library, report_detail
 from signaling import views, reservation_views, synchronization_views, report_draft_views
 
 
 app_name = "signaling"
 
 urlpatterns = [
+    path("reports/", report_library, name="report-library"),
+    path("reports/<uuid:report_id>/versions/<int:version>/artifacts/<uuid:artifact_id>/view/", report_artifact, name="report-artifact-view"),
+    path("reports/<uuid:report_id>/versions/<int:version>/artifacts/<uuid:artifact_id>/download/", report_artifact, {"download": True}, name="report-artifact-download"),
+    path("reports/<uuid:report_id>/", report_detail, name="report-detail"),
+    path("points/<int:point_id>/report-finalizations/", finalization.finalize_report, name="finalize-report"),
+    path("report-finalizations/<uuid:attempt_id>/", finalization.finalization_status, name="report-finalization-status"),
+    path("report-finalizations/<uuid:attempt_id>/retry/", finalization.retry_finalization, name="retry-report-finalization"),
     path("points/<int:point_id>/report-draft/", report_draft_views.report_draft, name="report-draft"),
     path("points/sync/", synchronization_views.synchronize, name="synchronize-points"),
     path("points/<int:point_id>/reservation/", reservation_views.status, name="reservation-status"),

@@ -166,3 +166,11 @@ registration_value = os.environ.get("DJANGO_REGISTRATION_ENABLED", "True").strip
 if registration_value not in {"true", "false", "1", "0", "yes", "no", "on", "off"}:
     raise ImproperlyConfigured("DJANGO_REGISTRATION_ENABLED must be true/false, 1/0, yes/no or on/off.")
 REGISTRATION_ENABLED = registration_value in {"true", "1", "yes", "on"}
+
+
+# Synchronous official finalization is for homologation only, opt-in.
+REPORT_FINALIZATION_ENABLED = os.environ.get("REPORT_FINALIZATION_ENABLED", "false").lower() == "true"
+REPORT_PRIVATE_ROOT = os.environ.get("REPORT_PRIVATE_ROOT", "")
+REPORT_LIBREOFFICE_EXECUTABLE = os.environ.get("REPORT_LIBREOFFICE_EXECUTABLE") or None
+REPORT_CONVERSION_TIMEOUT = 60
+REPORT_EXECUTION_SECONDS = 900

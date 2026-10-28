@@ -58,7 +58,8 @@
 .app-navbar__actions { display: flex; align-items: center; gap: 8px; flex: none; }
 .app-navbar__tools-slot { width: 44px; height: 44px; }
 .app-navbar .open-tools-panel-button,
-.app-account__trigger {
+.app-account__trigger,
+.app-navbar__link {
     box-sizing: border-box;
     display: flex;
     align-items: center;
@@ -79,11 +80,11 @@
 }
 .app-account__trigger { list-style: none; }
 .app-account__trigger::-webkit-details-marker { display: none; }
-.app-navbar :is(.open-tools-panel-button, .app-account__trigger):hover {
+.app-navbar :is(.open-tools-panel-button, .app-account__trigger, .app-navbar__link):hover {
     background: var(--app-button-hover);
     border-color: var(--app-button-hover);
 }
-.app-navbar :is(.open-tools-panel-button, .app-account__trigger):active,
+.app-navbar :is(.open-tools-panel-button, .app-account__trigger, .app-navbar__link):active,
 .app-navbar .open-tools-panel-button[aria-expanded="true"],
 .app-account__dropdown[open] > summary {
     color: var(--app-navbar-text);
@@ -176,6 +177,7 @@
 @media (prefers-reduced-motion: reduce) {
     .app-navbar .open-tools-panel-button,
     .app-account__trigger,
+    .app-navbar__link,
     .app-account__menu .btn { transition: none; }
 }
 
@@ -209,3 +211,6 @@
     min-height: 0;
     border: 0;
 }
+
+.app-navbar__link { text-decoration: none; flex: none; }
+.app-navbar__link img { display: block; }

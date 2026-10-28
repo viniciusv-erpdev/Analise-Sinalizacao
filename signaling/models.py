@@ -1,3 +1,6 @@
+import uuid
+
+from django.core.exceptions import ValidationError
 from django.core.validators import MaxLengthValidator, MaxValueValidator, MinValueValidator
 from django.db import models
 from django.conf import settings
@@ -242,3 +245,130 @@ class WaypointReportDraft(models.Model):
 
     def __str__(self):
         return f"Report draft for waypoint {self.signaling_point_id}"
+
+
+# Official reports are independent of the mutable waypoint/draft lifecycle.
+
+
+class TechnicalReport(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    waypoint = models.ForeignKey(SignalingPoint, null=True, blank=True, on_delete=models.SET_NULL)
+    waypoint_history = models.JSONField()
+    year = models.PositiveSmallIntegerField()
+    sequence = models.PositiveIntegerField()
+    number_reserved_at = models.DateTimeField()
+    number_assigned_at = models.DateTimeField(null=True, blank=True)
+
+    @property
+    def official_number(self):
+        return f"RTSV-{self.year:04d}-{self.sequence:04d}"
+
+    class Meta:
+        default_permissions = ()
+        permissions = [
+            ("finalize_technicalreport", "Pode finalizar relat\u00f3rios t\u00e9cnicos"),
+            ("view_official_reports", "Pode consultar relat\u00f3rios oficiais publicados"),
+            ("download_official_reports", "Pode baixar arquivos de relat\u00f3rios oficiais"),
+        ]
+        constraints = [
+            models.UniqueConstraint(fields=["year", "sequence"], name="report_annual_number_unique"),
+            models.CheckConstraint(condition=models.Q(sequence__gte=1, sequence__lte=9999), name="report_sequence_range"),
+        ]
+
+
+IMMUTABLE_VERSION_FIELDS = (
+    "report_id", "version", "schema_version", "snapshot", "snapshot_sha256",
+    "source_sha256", "author_identity", "issued_at",
+)
+
+
+class ReportVersionQuerySet(models.QuerySet):
+    def update(self, **kwargs):
+        if set(kwargs) & set(IMMUTABLE_VERSION_FIELDS + ("report",)):
+            raise ValidationError("Create a new version instead of changing historical inputs")
+        return super().update(**kwargs)
+
+
+class TechnicalReportVersion(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    report = models.ForeignKey(TechnicalReport, on_delete=models.PROTECT, related_name="versions")
+    version = models.PositiveIntegerField(default=1)
+    schema_version = models.PositiveSmallIntegerField(default=1)
+    snapshot = models.JSONField()
+    snapshot_sha256 = models.CharField(max_length=64)
+    source_sha256 = models.CharField(max_length=64)
+    author = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, on_delete=models.SET_NULL)
+    author_identity = models.JSONField()
+    issued_at = models.DateTimeField()
+    finalized_at = models.DateTimeField(null=True, blank=True)
+
+    objects = ReportVersionQuerySet.as_manager()
+
+    def save(self, *args, **kwargs):
+        if not self._state.adding:
+            previous = type(self).objects.values(*IMMUTABLE_VERSION_FIELDS, "finalized_at").get(pk=self.pk)
+            if any(previous[name] != getattr(self, name) for name in IMMUTABLE_VERSION_FIELDS):
+                raise ValidationError("Historical report inputs are immutable; create another version")
+            if previous["finalized_at"] and previous["finalized_at"] != self.finalized_at:
+                raise ValidationError("Finalization timestamp is immutable")
+        return super().save(*args, **kwargs)
+
+    class Meta:
+        default_permissions = ()
+        constraints = [models.UniqueConstraint(fields=["report", "version"], name="report_version_unique")]
+
+
+class ReportFinalizationAttempt(models.Model):
+    class State(models.TextChoices):
+        PROCESSING = "PROCESSING"
+        STORING = "STORING"
+        FINALIZED = "FINALIZED"
+        FAILED = "FAILED"
+        INTERRUPTED = "INTERRUPTED"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    version = models.OneToOneField(TechnicalReportVersion, on_delete=models.PROTECT, related_name="attempt")
+    requested_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, on_delete=models.SET_NULL)
+    idempotency_key = models.UUIDField(unique=True)
+    request_sha256 = models.CharField(max_length=64)
+    state = models.CharField(max_length=16, choices=State.choices, default=State.PROCESSING)
+    execution_id = models.UUIDField(default=uuid.uuid4)
+    deadline = models.DateTimeField(db_index=True)
+    error_code = models.CharField(max_length=80, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        default_permissions = ()
+
+
+class ReportArtifact(models.Model):
+    class Kind(models.TextChoices):
+        PDF = "PDF"
+        DOCX = "DOCX"
+        PHOTO = "PHOTO"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    version = models.ForeignKey(TechnicalReportVersion, on_delete=models.PROTECT, related_name="artifacts")
+    kind = models.CharField(max_length=5, choices=Kind.choices)
+    ordinal = models.PositiveSmallIntegerField(default=0)
+    storage_key = models.CharField(max_length=300, unique=True)
+    download_name = models.CharField(max_length=160)
+    content_type = models.CharField(max_length=100)
+    size = models.PositiveBigIntegerField()
+    sha256 = models.CharField(max_length=64)
+    metadata = models.JSONField(default=dict)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        default_permissions = ()
+        constraints = [models.UniqueConstraint(fields=["version", "kind", "ordinal"], name="report_artifact_kind_ordinal_unique")]
+
+
+class ReportAnnualCounter(models.Model):
+    year = models.PositiveSmallIntegerField(primary_key=True)
+    last_reserved = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        default_permissions = ()
+        constraints = [models.CheckConstraint(condition=models.Q(last_reserved__lte=9999), name="report_counter_range")]

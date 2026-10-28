@@ -253,3 +253,21 @@ não há PDF, numeração oficial ou armazenamento de documentos finalizados.
 
 Serviço, dependências opcionais, limites, comandos e pendências de aceite:
 [docx-to-pdf-poc.md](docx-to-pdf-poc.md). A PoC não altera o download DOCX nem o fluxo HTTP.
+
+
+## Finalizacao oficial - backend (Etapa 6)
+
+Modelos, contratos privados, limites, recuperacao e homologacao local:
+[report-finalization.md](report-finalization.md). Funcionalidade desabilitada por padrao.
+
+
+## Leitura de relatorios oficiais - Etapa 7A
+
+Politica centralizada, permissoes e validacao:
+[official-report-read-policy.md](official-report-read-policy.md). Sem novas views ou URLs.
+
+
+## Biblioteca de relatorios oficiais - Etapa 7B
+
+Listagem, filtros, autorizacao e homologacao:
+[official-report-library.md](official-report-library.md). Sem detalhes ou downloads.

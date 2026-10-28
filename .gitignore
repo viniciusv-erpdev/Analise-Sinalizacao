@@ -88,3 +88,8 @@ data/raw/*.csv
 *.sqlite3
 *.sqlite3-*
 *.sqlite3.*
+
+tmp/*
+
+resultado-testes-etapa6-final.txt
+resultado-testes-etapa6.txt

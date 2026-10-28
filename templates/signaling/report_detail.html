@@ -1,0 +1,71 @@
+{% load static tz %}
+<!doctype html>
+<html lang="pt-BR">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{ report.official_number }} - Relat&#243;rios oficiais</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css"
+          integrity="sha384-sRIl4kxILFvY47J16cr9ZwB07vP4J8+LH7qKQnuqkuIAvNWLzeN8tE5YBujZqJLB" crossorigin="anonymous">
+    <link rel="stylesheet" href="{% static 'css/app-shell.css' %}">
+    <link rel="stylesheet" href="{% static 'css/report-library.css' %}">
+    {% include "includes/favicon.html" %}
+</head>
+<body class="app-shell report-library-page">
+{% include "includes/navbar.html" %}
+<main class="report-library" id="main-content">
+    <header class="report-library__heading">
+        <div><h1>{{ report.official_number }}</h1><p>Hist&#243;rico de vers&#245;es oficialmente publicadas.</p></div>
+        <a class="report-library__back" href="{% url 'signaling:report-library' %}"><span aria-hidden="true">&#8592;</span> Voltar aos relat&#243;rios</a>
+    </header>
+    <dl class="report-library__metadata">
+        <dt>Waypoint hist&#243;rico</dt><dd>{{ report.waypoint_history.id|default:"Não informado" }}</dd>
+        <dt>&#218;ltima vers&#227;o publicada</dt><dd>{{ latest_version.version }}</dd>
+        <dt>Emiss&#227;o (S&#227;o Paulo)</dt><dd>{% timezone "America/Sao_Paulo" %}{{ latest_version.issued_at|date:"d/m/Y H:i" }}{% endtimezone %}</dd>
+        <dt>Autor hist&#243;rico</dt><dd>{{ latest_version.author_identity.username|default:latest_version.author_identity.full_name|default:"Não informado" }}</dd>
+    </dl>
+    <section class="report-versions" aria-labelledby="versions-heading">
+        <h2 id="versions-heading">Vers&#245;es publicadas</h2>
+        {% for version in versions %}
+        <article class="report-version{% if version.pk == latest_version.pk %} report-version--latest{% endif %}" aria-labelledby="version-{{ version.pk }}">
+            <header class="report-version__heading">
+                <h3 id="version-{{ version.pk }}">Vers&#227;o {{ version.version }}</h3>
+                {% if version.pk == latest_version.pk %}<span class="report-version__badge">Mais recente</span>{% endif %}
+            </header>
+            <dl class="report-version__metadata">
+                <div><dt>Emiss&#227;o (S&#227;o Paulo)</dt><dd>{% timezone "America/Sao_Paulo" %}<time datetime="{{ version.issued_at|date:'c' }}">{{ version.issued_at|date:"d/m/Y H:i" }}</time>{% endtimezone %}</dd></div>
+                <div><dt>Autor hist&#243;rico</dt><dd>{{ version.author_identity.username|default:version.author_identity.full_name|default:"Não informado" }}</dd></div>
+            </dl>
+            {% if version.visible_artifacts %}
+            <div class="report-version__actions">
+                {% for artifact in version.document_artifacts %}{% if artifact.kind == "PDF" %}
+                <a class="report-version__action report-version__action--primary" href="{% url 'signaling:report-artifact-view' report.pk version.version artifact.pk %}" target="_blank" rel="noopener noreferrer"><span aria-hidden="true">&#8599;</span> Visualizar relat&#243;rio<span class="visually-hidden"> (PDF, nova aba)</span></a>
+                <a class="report-version__action" href="{% url 'signaling:report-artifact-download' report.pk version.version artifact.pk %}"><span aria-hidden="true">&#8595;</span> Baixar PDF</a>
+                {% else %}<a class="report-version__action" href="{% url 'signaling:report-artifact-download' report.pk version.version artifact.pk %}"><span aria-hidden="true">&#8595;</span> Baixar DOCX</a>{% endif %}{% endfor %}
+            </div>
+            <details class="report-version__details">
+                <summary>Fotografias ({{ version.photo_artifacts|length }})</summary>
+                <div class="report-version__photos">{% for artifact in version.photo_artifacts %}
+                    <div class="report-version__photo"><span>Foto {{ artifact.ordinal|add:"1" }}</span><div class="report-version__actions">
+                        <a class="report-version__action" href="{% url 'signaling:report-artifact-view' report.pk version.version artifact.pk %}" target="_blank" rel="noopener noreferrer">Visualizar<span class="visually-hidden"> foto {{ artifact.ordinal|add:"1" }} (nova aba)</span></a>
+                        <a class="report-version__action" href="{% url 'signaling:report-artifact-download' report.pk version.version artifact.pk %}">Baixar<span class="visually-hidden"> foto {{ artifact.ordinal|add:"1" }}</span></a>
+                    </div></div>
+                {% empty %}<p>Nenhuma fotografia anexada.</p>{% endfor %}</div>
+            </details>
+            {% endif %}
+            <details class="report-version__details">
+                <summary>Detalhes t&#233;cnicos</summary>
+                <div class="report-version__technical">
+                    <p>SHA-256 do snapshot estruturado. Este hash n&#227;o identifica os arquivos PDF ou DOCX.</p>
+                    <code id="hash-{{ version.pk }}" class="report-version__hash">{{ version.snapshot_sha256 }}</code>
+                    <button type="button" data-copy-hash="hash-{{ version.pk }}" hidden>Copiar SHA-256</button>
+                    <span class="report-version__copy-status" role="status" aria-live="polite"></span>
+                </div>
+            </details>
+        </article>
+        {% endfor %}
+    </section>
+</main>
+<script src="{% static 'js/report_detail.js' %}" defer></script>
+</body>
+</html>
