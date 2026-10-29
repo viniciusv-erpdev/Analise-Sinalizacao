@@ -96,6 +96,8 @@ test("report close after popup closes discards late HTML and delegates draining 
     const dialog=f.body.children.at(-1);
     assert.equal(dialog.shown,true);
     f.marker.isPopupOpen=()=>false;
+    assert.equal(dialog.children[0].textContent,"\u00d7");
+    assert.equal(dialog.children[0].getAttribute("aria-label"),"Fechar relat\u00f3rio");
     dialog.children[0].onclick();assert.equal(dialog.removed,true);
     resolve("old report");await pending;
     assert.equal(dialog.children[2].srcdoc,undefined);
@@ -272,10 +274,11 @@ test("closing an unsaved report permits cancel; discard requires explicit confir
     const close=dialog.children[0].onclick();await Promise.resolve();await Promise.resolve();
     assert.equal(draft.flushes,1);assert.equal(dialog.removed,undefined);
     const confirmation=f.body.children.at(-1);assert.notEqual(confirmation,dialog);
-    confirmation.children[2].onclick();await close;
+    assert.equal(confirmation.children[0].textContent,"Cancelar");
+    confirmation.children.find(node=>node.textContent==="Cancelar").onclick();await close;
     assert.equal(dialog.removed,undefined);assert.equal(draft.destroyed,false);
     const discard=dialog.children[0].onclick();await Promise.resolve();await Promise.resolve();
-    f.body.children.at(-1).children[1].onclick();await discard;
+    f.body.children.at(-1).children.find(node=>node.textContent==="Confirmar").onclick();await discard;
     assert.equal(dialog.removed,true);assert.equal(draft.destroyed,true);
 });
 test("successful flush closes the report without a discard dialog",async t=>{
@@ -360,4 +363,15 @@ test("publication busy fences iframe edits, DOCX and navigation without another 
     bridge.onBusy(false);assert.equal(submit.disabled,false);assert.equal(text.readOnly,false);
     await dialog.children[0].onclick();assert.equal(dialog.removed,true);
     assert.equal(f.calls.filter(call=>call[0]==="acquire").length,1);
+});
+
+test("embedded report removes the redundant back link while parent close retains the map lease",async t=>{
+    const {f,draft,open}=draftUI(t);draft.pending=false;
+    const Parser=global.DOMParser,back=new Node("a");
+    global.DOMParser=class extends Parser{parseFromString(...args){const parsed=super.parseFromString(...args);
+        parsed.querySelector=selector=>selector==="[data-report-back]"?back:null;return parsed;}};
+    const {dialog}=await open();
+    assert.equal(back.removed,true);assert.equal(dialog.children.filter(node=>node.tag==="button").length,1);
+    await dialog.children[0].onclick();assert.equal(dialog.removed,true);
+    assert.equal(f.calls.filter(call=>call[0]==="close").length,0);
 });

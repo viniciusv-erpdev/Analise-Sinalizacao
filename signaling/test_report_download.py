@@ -595,3 +595,32 @@ class SignalingReportDownloadTests(ReservationFunctionalTestMixin, TestCase):
         self.user.user_permissions.add(Permission.objects.get(codename="view_official_reports"))
         response = self.client.get(self.url)
         self.assertContains(response, reverse("signaling:report-detail", args=["00000000-0000-0000-0000-000000000000"]))
+
+    def test_report_navigation_without_logout_and_green_publish_icon(self):
+        from django.contrib.auth.models import Permission
+        self.set_individual_analysis()
+        self.user.user_permissions.add(Permission.objects.get(codename="finalize_technicalreport"))
+        response = self.client.get(self.url)
+        self.assertNotContains(response, reverse("logout"))
+        self.assertNotContains(response, "Sair e encerrar")
+        self.assertContains(response, 'data-signaling-auth-notice')
+        self.assertContains(response, 'class="report-page-heading"')
+        self.assertContains(response, 'data-report-back', count=1)
+        self.assertContains(response, 'data-publication-cancel ', count=1)
+        self.assertContains(response, 'btn btn-success report-publish-action')
+        self.assertContains(response, 'icons/signaling/publish-icon.svg')
+        self.assertContains(response, 'Publicar relat&#243;rio oficial')
+        self.assertContains(response, 'Gerar relat')
+
+    def test_publication_modal_has_only_save_badge_and_new_action_outside(self):
+        from django.contrib.auth.models import Permission
+        self.set_individual_analysis()
+        self.user.user_permissions.add(Permission.objects.get(codename="finalize_technicalreport"))
+        response = self.client.get(self.url)
+        self.assertContains(response, 'data-publication-save-status', count=1)
+        for marker in ['data-publication-autosave', 'data-publication-revision', 'data-publication-photos', 'Preparar outro', 'A confer&#234;ncia das fotos']:
+            self.assertNotContains(response, marker)
+        html = response.content.decode()
+        self.assertLess(html.index('data-publication-new'), html.index('</form>'))
+        self.assertContains(response, 'Verificar publica&#231;&#227;o')
+        self.assertContains(response, 'report-primary-actions')

@@ -190,3 +190,16 @@ class ReportLibraryTests(ReportDataMixin, TestCase):
 
     def test_post_is_not_an_operation(self):
         self.assertEqual(self.client.post(self.url, {}).status_code, 405)
+
+    def test_detail_navigation_preserves_filters_and_current_page(self):
+        for number in range(2,22):
+            self.make_report(number)
+        response = self.client.get(self.url, {"author":"Historica", "year":"2026", "page":"2", "next":"https://outside.invalid"})
+        links = [urlsplit(unescape(href)) for href in re.findall(r'href="([^"]+)"',response.content.decode())]
+        detail = next(link for link in links if link.path == reverse("signaling:report-detail",args=[self.report.pk]))
+        self.assertEqual(parse_qs(detail.query), {"author":["Historica"],"year":["2026"],"page":["2"]})
+        back = self.client.get(detail.path + "?" + detail.query + "&next=https://outside.invalid")
+        links = [urlsplit(unescape(href)) for href in re.findall(r'href="([^"]+)"',back.content.decode())]
+        returned = next(link for link in links if link.path == self.url and link.query)
+        self.assertEqual(parse_qs(returned.query),parse_qs(detail.query))
+        self.assertNotIn("next",parse_qs(returned.query))

@@ -34,8 +34,12 @@ def report_library(request):
     for name in list(query):
         if name not in form.fields:
             del query[name]
+    navigation_query = query.copy()
+    if page is not None and page.number > 1:
+        navigation_query["page"] = str(page.number)
     return render(request, "signaling/report_library.html", {
         "filters": form, "page_obj": page, "filter_query": query.urlencode(), "filters_valid": status == 200,
+        "library_query": navigation_query.urlencode(),
     }, status=status)
 
 
@@ -66,7 +70,12 @@ def report_detail(request, report_id):
             (a for a in published.visible_artifacts if a.kind in ("PDF", "DOCX")),
             key=lambda artifact: artifact.kind != "PDF")
         published.photo_artifacts = [a for a in published.visible_artifacts if a.kind == "PHOTO"]
+    return_query = request.GET.copy()
+    for name in list(return_query):
+        if name not in (*OfficialReportFilters.base_fields, "page"):
+            del return_query[name]
     latest = max(versions, key=lambda version: version.version)
     return render(request, "signaling/report_detail.html", {
         "report": report, "versions": versions, "latest_version": latest,
+        "library_return_query": return_query.urlencode(),
     })

@@ -33,11 +33,11 @@
             <div class="report-library__table" tabindex="0" role="region" aria-label="Relat&#243;rios publicados">
                 <table>
                     <caption class="visually-hidden">Relat&#243;rios oficiais publicados</caption>
-                    <thead><tr><th scope="col">N&#250;mero oficial</th><th scope="col">Emiss&#227;o (S&#227;o Paulo)</th><th scope="col">Autor hist&#243;rico</th><th scope="col">Waypoint hist&#243;rico</th><th scope="col">Vers&#227;o</th></tr></thead>
+                    <thead><tr><th scope="col">N&#250;mero oficial</th><th scope="col">Emiss&#227;o (S&#227;o Paulo)</th><th scope="col">Autor</th><th scope="col">Waypoint de origem</th><th scope="col">Vers&#227;o</th></tr></thead>
                     <tbody>
                     {% for row in page_obj %}
                         <tr>
-                            <td><a href="{% url 'signaling:report-detail' row.pk %}">{{ row.official_number }}</a></td>
+                            <td><a href="{% url 'signaling:report-detail' row.pk %}{% if library_query %}?{{ library_query }}{% endif %}">{{ row.official_number }}</a></td>
                             <td>{% timezone "America/Sao_Paulo" %}{{ row.published_issued_at|date:"d/m/Y H:i" }}{% endtimezone %}</td>
                             <td>{{ row.historical_author.username|default:row.historical_author.full_name|default:"Não informado" }}</td>
                             <td>{{ row.waypoint_history.id|default:"Não informado" }}</td>

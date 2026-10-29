@@ -201,7 +201,7 @@
     grid-template-rows: auto auto minmax(0, 1fr);
     gap: 8px;
 }
-.waypoint-report-dialog > button { justify-self: start; }
+.waypoint-report-dialog > button { justify-self: end; }
 .waypoint-report-dialog > [role="status"] { margin: 0; overflow-wrap: anywhere; }
 .waypoint-report-dialog > iframe {
     display: block;
@@ -214,3 +214,10 @@
 
 .app-navbar__link { text-decoration: none; flex: none; }
 .app-navbar__link img { display: block; }
+
+.waypoint-confirm-dialog[open] { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; max-width: min(560px, calc(100vw - 24px)); max-height: calc(100dvh - 24px); overflow: auto; }
+.waypoint-confirm-dialog > .waypoint-confirm-dialog__close { grid-column: 2; grid-row: 1; justify-self: end; margin-left: 0 !important; }
+.waypoint-confirm-dialog > p { grid-column: 1 / -1; grid-row: 2; overflow-wrap: anywhere; }
+.waypoint-confirm-dialog > .waypoint-confirm-dialog__confirm { grid-column: 1 / -1; grid-row: 3; justify-self: start; }
+
+.waypoint-report-close { width: 36px; height: 36px; padding: 0; font-size: 24px; line-height: 1; }

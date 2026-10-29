@@ -23,14 +23,16 @@
         }
         if (!enabled) warnings.push("Finaliza\u00e7\u00e3o desabilitada na configura\u00e7\u00e3o do ambiente.");
         return {ready: warnings.length === 0, warnings, revision:confirmed ? draft.revision : null,
-            autosave:labels[draft?.state] || "Estado n\u00e3o confirmado", count:photos.length};
+            autosave:labels[draft?.state] || "Estado n\u00e3o confirmado", count:photos.length,
+            saveState:draft?.state === "saving" ? "saving" :
+                confirmed && draft.state === "saved" && !draft.pending && !draft.paused && !draft.stopped && !draft.conflict ? "saved" : "unsaved"};
     }
     function mount({doc, pointId, manager, draft, flowFactory, environment, onBusy = () => {}}) {
         const open = doc.querySelector("[data-publication-open]");
         const dialog = doc.querySelector("[data-publication-dialog]");
         const form = doc.querySelector("[data-waypoint-report-form]");
         if (!open || !dialog || !form) return null;
-        const field = name => dialog.querySelector(`[data-publication-${name}]`);
+        const field = name => name === "new" ? doc.querySelector("[data-publication-new]") : dialog.querySelector(`[data-publication-${name}]`);
         let flow = null, destroyed = false;
         const files = () => Array.from(form.querySelector('[name="photos"]')?.files || []);
         function readiness() {
@@ -69,19 +71,23 @@
             if (destroyed) return;
             const state = readiness(), progress = flow?.snapshot();
             field("point").textContent = String(pointId);
-            field("autosave").textContent = state.autosave;
-            field("revision").textContent = state.revision === null ? "N\u00e3o confirmada" : String(state.revision);
-            field("photos").textContent = String(state.count);
+            const badge = field("save-status");
+            badge.textContent = {saved:"Salvo", unsaved:"N\u00e3o salvo", saving:"Salvando..."}[state.saveState];
+            badge.className = `report-save-status report-save-status--${state.saveState}`;
             field("warnings").textContent = state.warnings.join(" ");
             if (!field("confirm")) return; // Graceful preview if the activation module is unavailable.
             const busy = !!progress?.busy, record = progress?.record, outcome = progress?.outcome;
             field("confirm").disabled = !state.ready || !progress?.supported || busy || !!record || ["journal_unavailable","journal_invalid"].includes(outcome?.code) || !!manager.snapshot?.().busy;
             field("cancel").disabled = busy;
-            field("recover").hidden = !record;
+            const published = outcome?.kind === "published";
+            const definitive = ["report_source_changed", "snapshot_integrity_failed", "waypoint_not_found", "idempotency_key_conflict"].includes(outcome?.code);
+            field("confirm").hidden = busy || !!record;
+            field("recover").hidden = busy || !record || published || definitive;
+
             field("recover").disabled = busy || dialog.dataset.enabled !== "true" || (!record?.attemptId && !state.ready);
-            field("retry").hidden = !["FAILED","INTERRUPTED"].includes(record?.last?.attempt?.state);
+            field("retry").hidden = busy || published || definitive || !["FAILED","INTERRUPTED"].includes(record?.last?.attempt?.state);
             field("retry").disabled = busy || !state.ready || record?.last?.code === "idempotency_key_conflict";
-            field("new").hidden = !progress?.canStartNew;
+            field("new").hidden = busy || !progress?.canStartNew;
             field("new").disabled = busy || dialog.dataset.enabled !== "true";
             const result = field("result");
             result.textContent = busy ? "Publica\u00e7\u00e3o em andamento. Aguarde a confirma\u00e7\u00e3o do servidor." :
@@ -112,14 +118,29 @@
                 notify(progress) { if (!destroyed) { onBusy(progress.busy); update(); } },
             });
             for (const [name,method] of [["confirm","publish"],["recover","recover"],["retry","retry"],["new","newReport"]]) {
-                const button = field(name), handler = () => { if (!button.disabled) void flow[method](); };
+                const button = field(name), handler = async () => {
+                    if (button.disabled || button.hidden) return;
+                    await flow[method]();
+                    if (name === "new" && !flow.snapshot().record) show();
+                };
                 button.addEventListener("click",handler); buttonBindings.push([button,handler]);
             }
         }
         const storageChanged = () => { if (!flow?.snapshot().busy) flow?.refresh(); };
         environment?.addEventListener("storage",storageChanged);
-        function show() { flow?.refresh(); update(); if (!dialog.open) dialog.showModal(); }
-        function close() { if (flow?.snapshot().busy) return; if (dialog.open) dialog.close(); open.focus(); }
+        let previousOverflow;
+        function restoreScroll() {
+            if (previousOverflow !== undefined && doc.body?.style) doc.body.style.overflow = previousOverflow;
+            previousOverflow = undefined;
+        }
+        function show() {
+            flow?.refresh(); update();
+            if (!dialog.open) {
+                if (doc.body?.style) { previousOverflow = doc.body.style.overflow; doc.body.style.overflow = "hidden"; }
+                dialog.showModal();
+            }
+        }
+        function close() { if (flow?.snapshot().busy) return; if (dialog.open) dialog.close(); restoreScroll(); open.focus(); }
         function refresh() { if (dialog.open) update(); }
         function cancel(event) { event.preventDefault(); close(); }
         open.addEventListener("click",show);
@@ -139,6 +160,7 @@
             dialog.removeEventListener("cancel",cancel);
             form.removeEventListener("input",refresh); form.removeEventListener("change",refresh);
             if (dialog.open) dialog.close();
+            restoreScroll();
         }};
     }
     return {evaluate, mount};

@@ -62,3 +62,9 @@
 .report-version__hash { display: block; padding: 12px; margin-bottom: 12px; background: #f4f6f8; border-radius: 5px; user-select: all; }
 .report-version__copy-status { display: block; margin-top: 8px; color: #526577; font-size: .9rem; }
 @media (max-width: 480px) { .report-version { padding: 16px; } .report-version__actions { width: 100%; } .report-version__action { flex: 1 1 auto; } }
+
+/* Navigation stays above the content, on the right, even when headings wrap. */
+.report-library__heading { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; }
+.report-library__heading > div { grid-column: 1 / -1; grid-row: 2; min-width: 0; }
+.report-library__heading > .report-library__back { grid-column: 2; grid-row: 1; justify-self: end; }
+.report-library__heading h1 { overflow-wrap: anywhere; }

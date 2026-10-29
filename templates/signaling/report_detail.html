@@ -15,14 +15,14 @@
 {% include "includes/navbar.html" %}
 <main class="report-library" id="main-content">
     <header class="report-library__heading">
-        <div><h1>{{ report.official_number }}</h1><p>Hist&#243;rico de vers&#245;es oficialmente publicadas.</p></div>
-        <a class="report-library__back" href="{% url 'signaling:report-library' %}"><span aria-hidden="true">&#8592;</span> Voltar aos relat&#243;rios</a>
+        <div><h1>{{ report.official_number }}</h1><span class="report-version__badge">Publicado</span><p>Hist&#243;rico de vers&#245;es oficialmente publicadas.</p></div>
+        <a class="report-library__back" href="{% url 'signaling:report-library' %}{% if library_return_query %}?{{ library_return_query }}{% endif %}"><span aria-hidden="true">&#8592;</span> Voltar aos relat&#243;rios</a>
     </header>
     <dl class="report-library__metadata">
-        <dt>Waypoint hist&#243;rico</dt><dd>{{ report.waypoint_history.id|default:"Não informado" }}</dd>
+        <dt>Waypoint de origem</dt><dd>{{ report.waypoint_history.id|default:"Não informado" }}</dd>
         <dt>&#218;ltima vers&#227;o publicada</dt><dd>{{ latest_version.version }}</dd>
         <dt>Emiss&#227;o (S&#227;o Paulo)</dt><dd>{% timezone "America/Sao_Paulo" %}{{ latest_version.issued_at|date:"d/m/Y H:i" }}{% endtimezone %}</dd>
-        <dt>Autor hist&#243;rico</dt><dd>{{ latest_version.author_identity.username|default:latest_version.author_identity.full_name|default:"Não informado" }}</dd>
+        <dt>Autor</dt><dd>{{ latest_version.author_identity.username|default:latest_version.author_identity.full_name|default:"Não informado" }}</dd>
     </dl>
     <section class="report-versions" aria-labelledby="versions-heading">
         <h2 id="versions-heading">Vers&#245;es publicadas</h2>
@@ -34,7 +34,7 @@
             </header>
             <dl class="report-version__metadata">
                 <div><dt>Emiss&#227;o (S&#227;o Paulo)</dt><dd>{% timezone "America/Sao_Paulo" %}<time datetime="{{ version.issued_at|date:'c' }}">{{ version.issued_at|date:"d/m/Y H:i" }}</time>{% endtimezone %}</dd></div>
-                <div><dt>Autor hist&#243;rico</dt><dd>{{ version.author_identity.username|default:version.author_identity.full_name|default:"Não informado" }}</dd></div>
+                <div><dt>Autor</dt><dd>{{ version.author_identity.username|default:version.author_identity.full_name|default:"Não informado" }}</dd></div>
             </dl>
             {% if version.visible_artifacts %}
             <div class="report-version__actions">

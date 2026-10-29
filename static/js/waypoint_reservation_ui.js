@@ -170,11 +170,11 @@
             if (current?.point.id === id) { current = null; manager.close(); }
         }
         async function confirm(message) {
-            const dialog = document.createElement("dialog"); dialog.className = "rounded border p-3";
+            const dialog = document.createElement("dialog"); dialog.className = "waypoint-confirm-dialog rounded border p-3";
             const text = document.createElement("p"); text.textContent = message;
-            const yes = document.createElement("button"); yes.className = "btn btn-danger"; yes.textContent = "Confirmar";
-            const no = document.createElement("button"); no.className = "btn btn-secondary ms-2"; no.textContent = "Cancelar";
-            dialog.append(text,yes,no); document.body.append(dialog);
+            const yes = document.createElement("button"); yes.className = "btn btn-danger waypoint-confirm-dialog__confirm"; yes.textContent = "Confirmar";
+            const no = document.createElement("button"); no.className = "btn btn-secondary waypoint-confirm-dialog__close"; no.textContent = "Cancelar";
+            dialog.append(no,text,yes); document.body.append(dialog);
             return new Promise(resolve => {
                 const done = value => { dialog.close(); dialog.remove(); resolve(value); };
                 yes.onclick = () => done(true); no.onclick = () => done(false);
@@ -187,7 +187,9 @@
             const dialog = document.createElement("dialog");
             dialog.className = "waypoint-report-dialog";
             const closeButton = document.createElement("button");
-            closeButton.className = "btn btn-outline-secondary btn-sm"; closeButton.textContent = "Encerrar relatório";
+            closeButton.className = "btn btn-outline-secondary btn-sm waypoint-report-close"; closeButton.textContent = "\u00d7";
+            closeButton.setAttribute("aria-label", "Fechar relat\u00f3rio");
+            closeButton.setAttribute("title", "Fechar relat\u00f3rio");
             const message = document.createElement("p"); message.className = "small"; message.setAttribute("role","status");
             const frame = document.createElement("iframe"); frame.title = "Relatório de sinalização";
             dialog.append(closeButton,message,frame); document.body.append(dialog);
@@ -299,6 +301,8 @@
                 // Embedded screen layout only; standalone/print styles stay unchanged.
                 const embeddedStyle = parsed.createElement("style");
                 embeddedStyle.textContent = "@media screen { html .report-accidents { max-height: none; } }";
+                const embeddedBack = parsed.querySelector?.("[data-report-back]");
+                if (embeddedBack) embeddedBack.remove(); // The parent dialog owns the single close control.
                 parsed.head.prepend(base,embeddedStyle); frame.srcdoc = "<!doctype html>" + parsed.documentElement.outerHTML;
             }
             try {
