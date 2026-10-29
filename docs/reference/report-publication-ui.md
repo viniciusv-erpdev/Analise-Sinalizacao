@@ -202,3 +202,40 @@ usuario; ela nao substitui a homologacao PostgreSQL e visual desta nova interfac
 Se o contexto/fotos originais forem irrecuperaveis e a tentativa permanecer
 incerta, solicitar verificacao administrativa no PostgreSQL pela chave antes de
 remover qualquer registro local. Nao improvisar nova intencao para contornar isso.
+
+## Navegacao apos publicacao: propriedade da reserva
+
+A consulta publicada antes usava target=_blank. O mapa original continuava aberto
+com sua reserva/heartbeat; voltar ao mapa pelo link da biblioteca na outra aba
+criava outro documento/interaction_id. reservation_occupied era a rejeicao correta
+desse segundo documento, inclusive para a mesma conta. Nao era uma reserva orfa.
+
+A consulta apos publicacao agora usa target=_top e o pai intercepta a navegacao:
+verifica pendencias, aguarda manager.leave() confirmar o encerramento e so entao
+substitui o mapa pela pagina de detalhes na mesma aba. Links locais da navbar do
+mapa tambem aguardam liberacao, evitando depender apenas de pagehide. Em falha de
+rede, permanece na pagina e permite nova tentativa explicita com a prova anterior
+mantida somente em memoria. Nao transfere prova entre abas nem permite takeover.
+
+leave() agora retorna Promise<boolean> sem mudar seu comportamento sincrono de
+encerrar a interacao. false significa que ainda ha entradas pendentes, incluindo
+liberacao nao confirmada. Requisicoes concorrentes compartilham releasePromise;
+release espera renovacao em andamento. pagehide continua best effort/keepalive,
+nao libera operacoes busy/acquiring e nao gera rejeicao nao tratada. pageshow
+reconcilia entradas e descarta formulario de aquisicao encerrada antes de nova
+abertura. Nao ha alteracao de TTL, protocolo HTTP, backend ou publicacao.
+
+PDF/fotos nos detalhes continuam abrindo em nova aba; essas paginas nao possuem
+reserva. Abrir outro mapa manualmente enquanto o original ainda esta reservado
+continua corretamente bloqueado. Fechar o navegador abruptamente, matar o processo
+ou perder a rede durante navegacao nao controlavel ainda depende do TTL; nao se
+promete liberacao garantida nesses casos.
+
+Homologar publicacao sintetica, consulta na mesma aba, retorno pelo link da
+biblioteca e pelo Voltar/BFCache. No Network, release deve terminar antes da
+navegacao; ao retornar, acquire deve usar geracao posterior sem esperar 120s.
+Testar rede offline durante release: nao deve navegar nem criar nova aquisicao.
+Restaurar rede e clicar novamente para confirmar liberacao. Fechar apenas o
+relatorio conserva a reserva se waypoint estiver aberto. Fechar ultimo dono
+remove heartbeat. Testes PostgreSQL novos cobrem renew/release e releases duplicados
+com locks reais; exigem o ambiente local autenticado e banco de testes descartavel.

@@ -1,10 +1,62 @@
 /* Map/popup/report lifecycle. No credentials are rendered into HTML or persisted. */
 (function (root) {
     "use strict";
-    if (typeof module === "object" && module.exports) module.exports = {create};
+    if (typeof module === "object" && module.exports) module.exports = {create, readReportResponse};
     else root.WaypointReservationUI = {create};
+    // Error HTML is parsed inertly and never inserted into the iframe.
+    function openingError(code, status = 0) {
+        return Object.assign(new Error(code), {code, status});
+    }
+    async function readReportResponse(res) {
+        const type = (res.headers?.get("Content-Type") || "").split(";")[0].trim().toLowerCase();
+        if (res.status === 200 && type === "text/html") {
+            const html = await res.text();
+            const parsed = new DOMParser().parseFromString(html, "text/html");
+            if (parsed.querySelector("[data-waypoint-report-form], [data-report-analysis-unavailable]")) return html;
+            throw openingError("report_invalid_response", 200);
+        }
+        if (res.status === 400 && type === "text/html") {
+            const parsed = new DOMParser().parseFromString(await res.text(), "text/html");
+            const detail = parsed.querySelector("[data-report-filter-error]");
+            if (detail) throw openingError(detail.textContent.trim() === "Os filtros informados pertencem a outra an\u00e1lise."
+                ? "report_analysis_stale" : "report_filters_invalid", 400);
+        }
+        if (res.status < 500 && type === "application/json") {
+            let data;
+            try { data = await res.json(); } catch { /* Never display the response body. */ }
+            const allowed = {400:["invalid_reservation_arguments"], 401:["authentication_required"],
+                403:["permission_denied", "reservation_credentials_invalid", "csrf_failed"],
+                404:["waypoint_not_found"], 409:["reservation_expired", "reservation_inactive", "reservation_generation_stale", "reservation_occupied"],
+                428:["reservation_required"]};
+            if (allowed[res.status]?.includes(data?.code)) throw openingError(data.code, res.status);
+        }
+        throw openingError(({401:"authentication_required",403:"permission_denied",404:"waypoint_not_found",
+            409:"report_conflict",428:"reservation_required"})[res.status] || (res.status >= 500 ? "report_server_error" : "report_invalid_response"), res.status);
+    }
+    function openingFailure(error) {
+        const code = error?.code;
+        if (code === "report_analysis_stale") return {category:"analysis", reload:true,
+            message:"A an\u00e1lise deste mapa est\u00e1 desatualizada. Uma nova an\u00e1lise pode ter sido carregada em outra aba. Atualize o mapa explicitamente para continuar."};
+        if (code === "report_filters_invalid") return {category:"filters", reload:true,
+            message:"Os filtros do relat\u00f3rio n\u00e3o correspondem \u00e0 an\u00e1lise atual. Confira os filtros ou atualize o mapa. Nenhum filtro foi alterado automaticamente."};
+        const messages = {
+            invalid_reservation_arguments:["credentials", "Credenciais de reserva inv\u00e1lidas. Feche o relat\u00f3rio e reabra o waypoint pelo mapa."],
+            reservation_credentials_invalid:["credentials", "A reserva n\u00e3o pertence a esta intera\u00e7\u00e3o. Feche o relat\u00f3rio e confira o waypoint."],
+            reservation_required:["credentials", "Reserva n\u00e3o confirmada. Feche o relat\u00f3rio e use o fluxo normal do waypoint."],
+            permission_denied:["authorization", "Voc\u00ea n\u00e3o tem permiss\u00e3o para abrir este relat\u00f3rio."],
+            authentication_required:["authorization", "Sua sess\u00e3o terminou. Entre novamente pelo mapa."],
+            csrf_failed:["authorization", "N\u00e3o foi poss\u00edvel confirmar sua sess\u00e3o. Confira sua autentica\u00e7\u00e3o pelo mapa."],
+            waypoint_not_found:["not_found", "O waypoint n\u00e3o est\u00e1 dispon\u00edvel. Feche o relat\u00f3rio e atualize o mapa."],
+            network:["network", "Falha de rede ao abrir o relat\u00f3rio. Confira a conex\u00e3o, feche esta tela e tente novamente pelo waypoint."],
+        };
+        if (messages[code]) return {category:messages[code][0],message:messages[code][1]};
+        if (["reservation_expired","reservation_inactive","reservation_generation_stale","reservation_occupied","superseded","report_conflict"].includes(code)) {
+            return {category:"reservation",message:"A reserva foi encerrada, substitu\u00edda ou est\u00e1 em conflito. Feche esta tela e confira o waypoint pelo fluxo normal."};
+        }
+        return {category:"server",message:"N\u00e3o foi poss\u00edvel abrir o relat\u00f3rio devido a uma resposta inesperada do servidor. Feche esta tela e tente novamente. Se persistir, informe o suporte."};
+    }
     function create({manager, document, window, map, markers, canChange, canDelete, canReport, render}) {
-        let current = null, report = null, pollCursor = 0;
+        let current = null, report = null, pollCursor = 0, navigating = false;
         const bindings = new Map();
         const blocked = new WeakMap();
         const guarded = new WeakSet();
@@ -99,7 +151,7 @@
                 } else if (state.state === "uncertain") report.draft?.pause();
                 else report.draft?.resume();
                 const allowed = manager.canOperate(report.id) && !report.closing && !report.invalidated && !report.publicationBusy;
-                report.message.textContent = state.message || labels[state.state] || "";
+                report.message.textContent = report.openFailure?.message || state.message || labels[state.state] || "";
                 const doc = report.frame.contentDocument;
                 if (doc) reportControls(doc, allowed);
             }
@@ -140,6 +192,7 @@
             update(binding);
         }
         async function begin(marker,point) {
+            if (navigating) return;
             if (report) { notify("Encerre o relatório antes de trocar de waypoint."); return; }
             current = {marker,point,ready:false};
             try {
@@ -182,6 +235,33 @@
                 dialog.showModal();
             });
         }
+        function navigationNotice(text) {
+            notify(text);
+            // The parent document's toast is behind a modal's top layer.
+            if (report) {
+                report.message.textContent = text;
+                report.message.setAttribute("role", "alert");
+            }
+        }
+        async function navigateFromMap(href) {
+            if (navigating) return;
+            if (report?.publicationBusy || report?.draft?.hasPending() || manager.snapshot().busy) {
+                navigationNotice("Conclua as opera\u00e7\u00f5es ou resolva as altera\u00e7\u00f5es pendentes antes de sair.");
+                return;
+            }
+            const destination = new URL(href, window.location.href);
+            if (destination.origin !== new URL(window.location.href).origin) return;
+            navigating = true;
+            try {
+                if (!await manager.leave()) {
+                    navigationNotice("N\u00e3o foi poss\u00edvel confirmar a libera\u00e7\u00e3o da reserva. Confira a conex\u00e3o e tente abrir o relat\u00f3rio novamente. Nenhuma nova reserva foi criada.");
+                    return;
+                }
+                window.location.assign(destination.href);
+            } catch {
+                navigationNotice("N\u00e3o foi poss\u00edvel concluir a sa\u00edda do mapa. Confira a conex\u00e3o e tente novamente.");
+            } finally { navigating = false; }
+        }
         async function openReport(id,url) {
             if (report) return;
             const dialog = document.createElement("dialog");
@@ -216,6 +296,7 @@
                 } else {
                     manager.close(); // No remaining UI owner: drain work before release.
                 }
+                return true;
             };
             closeButton.onclick = finish;
             dialog.addEventListener("cancel",event => { event.preventDefault(); finish(); });
@@ -285,6 +366,11 @@
                     });
                     doc.addEventListener("click",event => {
                         const link = event.target.closest("a");
+                        if (link?.hasAttribute?.("data-publication-report-link")) {
+                            event.preventDefault();
+                            void navigateFromMap(link.getAttribute("href"));
+                            return;
+                        }
                         if (!link || link.target === "_blank") return;
                         event.preventDefault();
                         if (link.getAttribute("href") === "/") finish();
@@ -305,13 +391,36 @@
                 if (embeddedBack) embeddedBack.remove(); // The parent dialog owns the single close control.
                 parsed.head.prepend(base,embeddedStyle); frame.srcdoc = "<!doctype html>" + parsed.documentElement.outerHTML;
             }
+            message.textContent = "Abrindo relat\u00f3rio...";
             try {
-                const html = await manager.perform(id,url,{},async res => {
-                    if (!res.ok) throw new Error("Não foi possível abrir o relatório.");
-                    return res.text();
-                });
+                const html = await manager.perform(id,url,{},readReportResponse,{consumeErrors:true});
+                if (flow.closing || flow.invalidated || report !== flow) return;
+                message.textContent = "";
                 show(html);
-            } catch (error) { message.textContent = error.message; }
+            } catch (error) {
+                if (flow.closing || report !== flow) return;
+                const failure = openingFailure(error);
+                flow.openFailure = failure;
+                frame.hidden = true;
+                message.textContent = failure.message;
+                message.setAttribute("role", "alert");
+                // Fixed categories/status only: never log URL, payload, proof or exception.
+                window.console?.warn("report_open_failed", {category:failure.category, status:Number.isInteger(error?.status) ? error.status : 0});
+                if (failure.reload) {
+                    const recovery = document.createElement("div");
+                    const refreshMap = document.createElement("button");
+                    refreshMap.type = "button"; refreshMap.className = "btn btn-outline-primary";
+                    refreshMap.textContent = "Atualizar mapa";
+                    recovery.style.alignSelf = "start";
+                    refreshMap.onclick = async () => {
+                        if (refreshMap.disabled || flow.closing) return;
+                        refreshMap.disabled = true;
+                        try { if (await finish()) window.location.reload(); }
+                        finally { refreshMap.disabled = false; }
+                    };
+                    recovery.append(refreshMap); dialog.append(recovery);
+                }
+            }
         }
         // Bounded advisory polling, never acquisition. Hidden tabs do no status polling.
         let polling = false;
@@ -376,7 +485,13 @@
             if (report?.publicationBusy || report?.draft?.hasPending() || manager.snapshot().busy) {
                 event.preventDefault(); event.stopImmediatePropagation();
                 notify("Conclua as operações ou encerre o relatório resolvendo as alterações pendentes antes de sair.");
-            } else manager.leave();
+            } else {
+                if (event.defaultPrevented || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey || (event.button !== undefined && event.button !== 0) || link.hasAttribute?.("download")) return;
+                const href = link.getAttribute("href");
+                if (!href || new URL(href,window.location.href).origin !== new URL(window.location.href).origin) return;
+                event.preventDefault();
+                void navigateFromMap(href);
+            }
         },true);
         function isOpen(id) {
             return current?.point.id === id || report?.id === id;

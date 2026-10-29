@@ -106,3 +106,29 @@ verificar a tentativa; sucesso deve apresentar numero/versao/link autorizado sem
 botoes redundantes. Fechar/reabrir/recarregar nao pode publicar. Testar preparar
 nova publicacao explicitamente, cancelar e confirmar que nao ha novo registro.
 Conferir Word e fechamento com popup aberto/fechado, nos viewports 320/768/1280.
+
+## 7F-C1.1 - erros de abertura
+
+A abertura usa o consumidor opt-in ja existente de manager.perform. Respostas
+200 text/html precisam conter o formulario ou o aviso conhecido de ausencia de
+analise. Erros HTML nunca entram no srcdoc: o parser inerte identifica somente o
+marcador data-report-filter-error; mensagens da interface sao constantes locais.
+JSON aceita somente codigos conhecidos por status, sem mostrar error do servidor.
+403/409/428 continuam passando pelo fencing de erro do manager. Nao ha mudanca
+em renovacao, aquisicao, liberacao, validacao de filtros ou publicacao.
+
+Falha esconde o iframe vazio e deixa mensagem persistente, inclusive durante
+heartbeat. Atualizar mapa aparece para filtros/analise e exige clique. Usa o mesmo
+finish, incluindo verificacao de pendencias, antes do reload. Nao remove filtros,
+nao troca analysisId em memoria e nao cria polling ou retry automatico. Diagnostico
+console.warn report_open_failed contem somente categoria fixa e status numerico;
+nao registra URL, excecao, corpo, sessao, fotos ou prova de reserva.
+
+Homologacao: abrir analise A em uma aba, carregar analise B na mesma sessao em
+outra, voltar a primeira e abrir relatorio. Deve mostrar aviso de analise antiga,
+sem iframe de erro nem refresh automatico. Conferir Atualizar mapa e o X. Fechar
+somente o relatorio mantem a reserva se popup estiver aberto; fechar o ultimo
+proprietario deve liberar. Testar rede offline, permissao insuficiente e nova
+abertura normal; geracao Word e publicacao devem manter os fluxos existentes.
+O relato de reserva presa nao foi reproduzido: estes testes nao comprovam a
+correcao de uma causa desconhecida. Validacao PostgreSQL e visual permanece local.

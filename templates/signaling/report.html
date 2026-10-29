@@ -94,10 +94,10 @@
         {% if filter_error %}
             <div class="alert alert-danger" role="alert">
                 <h2 class="h5">Não foi possível aplicar os filtros do relatório.</h2>
-                <p class="mb-0">{{ filter_error }}</p>
+                <p class="mb-0" data-report-filter-error>{{ filter_error }}</p>
             </div>
         {% elif not survey %}
-            <div class="alert alert-info" role="status">
+            <div class="alert alert-info" role="status" data-report-analysis-unavailable>
                 <h2 class="h5">Não há uma análise de sinistros individuais disponível.</h2>
                 <p class="mb-0">
                     Carregue os arquivos no modo Todos os sinistros e tente novamente.
@@ -434,7 +434,7 @@
         <p role="status" aria-live="polite">Status: <span class="report-save-status report-save-status--unsaved" data-publication-save-status>N&#227;o salvo</span></p>
         <div role="status" aria-live="polite" data-publication-warnings></div>
         <p role="status" aria-live="polite" data-publication-result></p>
-        <a class="btn btn-outline-primary mb-2" data-publication-report-link target="_blank" rel="noopener noreferrer" hidden>Consultar relat&#243;rio publicado</a>
+        <a class="btn btn-outline-primary mb-2" data-publication-report-link target="_top" rel="noopener noreferrer" hidden>Consultar relat&#243;rio publicado</a>
         <button type="button" class="btn btn-primary" disabled data-publication-confirm data-publication-preview-control>Confirmar publica&#231;&#227;o</button>
         <button type="button" class="btn btn-outline-primary mt-2" data-publication-recover data-publication-preview-control hidden>Verificar publica&#231;&#227;o</button>
         <button type="button" class="btn btn-outline-primary mt-2" data-publication-retry data-publication-preview-control hidden>Retomar tentativa</button>

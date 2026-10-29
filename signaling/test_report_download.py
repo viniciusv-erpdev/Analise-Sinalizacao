@@ -624,3 +624,39 @@ class SignalingReportDownloadTests(ReservationFunctionalTestMixin, TestCase):
         self.assertLess(html.index('data-publication-new'), html.index('</form>'))
         self.assertContains(response, 'Verificar publica&#231;&#227;o')
         self.assertContains(response, 'report-primary-actions')
+
+    def test_opening_stale_analysis_has_safe_filter_marker_and_no_form(self):
+        self.set_individual_analysis()
+        response = self.client.get(self.url + "?analysis=old-analysis")
+        self.assertEqual(response.status_code, 400)
+        self.assertTrue(response["Content-Type"].startswith("text/html"))
+        self.assertContains(response, 'data-report-filter-error', status_code=400)
+        self.assertNotContains(response, 'data-waypoint-report-form', status_code=400)
+        corrected = self.client.get(self.url + "?analysis=current-analysis")
+        self.assertContains(corrected, 'data-waypoint-report-form')
+
+    def test_opening_without_analysis_has_known_empty_state(self):
+        response = self.client.get(self.url)
+        self.assertContains(response, 'data-report-analysis-unavailable')
+        self.assertNotContains(response, 'data-waypoint-report-form')
+
+    def test_opening_missing_and_malformed_credentials_keep_json_contract(self):
+        from django.test import Client
+        direct = Client()
+        direct.cookies = self.client.cookies
+        response = direct.get(self.url)
+        self.assertEqual(response.status_code, 428)
+        self.assertEqual(response.json()["code"], "reservation_required")
+        proof = self.client.reserve(self.point.pk)
+        proof["HTTP_X_WAYPOINT_GENERATION"] = "01"
+        response = direct.get(self.url, **proof)
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["code"], "invalid_reservation_arguments")
+
+    def test_published_consultation_replaces_map_instead_of_opening_competing_map(self):
+        from django.contrib.auth.models import Permission
+        self.set_individual_analysis()
+        self.user.user_permissions.add(Permission.objects.get(codename="finalize_technicalreport"))
+        response = self.client.get(self.url)
+        self.assertContains(response, 'data-publication-report-link target="_top"')
+        self.assertNotContains(response, 'data-publication-report-link target="_blank"')

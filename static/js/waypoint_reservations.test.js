@@ -417,3 +417,62 @@ test("draft content conflict preserves the valid acquisition and original CSRF h
     assert.equal(call.options.headers["X-Waypoint-Generation"],"1");
     await c.manager.renew();assert.equal(c.manager.canOperate(7),true);
 });
+
+
+test("report opening HTTP400 drains busy state and complete close cancels heartbeat",async()=>{
+    const {readReportResponse}=require("./waypoint_reservation_ui.js");
+    const backend=server(),base=backend.fetch;
+    const c=client({fetch:(url,options)=>url.includes('/report/')?Promise.resolve({ok:false,status:400,
+        headers:{get:()=>"application/json"},json:async()=>({code:"invalid_reservation_arguments"})}):base(url,options)});
+    await c.manager.acquire(7);
+    await assert.rejects(c.manager.perform(7,"/points/7/report/",{},readReportResponse,{consumeErrors:true}),{code:"invalid_reservation_arguments"});
+    assert.equal(c.manager.snapshot().busy,0);assert.equal(c.manager.canOperate(7),true);
+    assert.ok(c.timers.size>0);assert.ok(backend.held);
+    await c.manager.close();assert.equal(backend.held,null);assert.equal(c.timers.size,0);
+});
+test("report opening 428 retains existing reservation error fencing and drains pending work",async()=>{
+    const {readReportResponse}=require("./waypoint_reservation_ui.js");
+    const backend=server(),base=backend.fetch;
+    const c=client({fetch:(url,options)=>url.includes('/report/')?Promise.resolve({ok:false,status:428,
+        headers:{get:()=>"application/json"},json:async()=>({code:"reservation_required"})}):base(url,options)});
+    await c.manager.acquire(7);
+    await assert.rejects(c.manager.perform(7,"/points/7/report/",{},readReportResponse,{consumeErrors:true}),{code:"reservation_required"});
+    assert.equal(c.manager.snapshot().busy,0);assert.equal(c.manager.canOperate(7),false);
+    await c.manager.close();assert.equal(backend.held,null);assert.equal(c.timers.size,0);
+});
+
+
+test("confirmed departure permits another map interaction immediately without waiting for TTL",async()=>{
+    const backend=server(),original=backend.fetch,gate=deferred();
+    backend.fetch=async(url,options)=>{if(url.endsWith('/release/'))await gate.promise;return original(url,options);};
+    const owner=client(backend,"old-map"),next=client(backend,"new-map");await owner.manager.acquire(7);
+    await owner.manager.perform(7,"/points/7/report-finalizations/",{method:"POST"},async()=>({state:"FINALIZED"}));
+    await assert.rejects(next.manager.acquire(7),{code:"reservation_occupied"});
+    let departed=false;const departure=owner.manager.leave().then(ok=>{departed=ok;return ok;});await tick();
+    assert.equal(departed,false);assert.ok(backend.held);
+    gate.resolve();assert.equal(await departure,true);
+    owner.manager.leave();await tick(); // subsequent pagehide does not repeat release
+    assert.equal(backend.calls.filter(c=>c.url.endsWith('/release/')).length,1);
+    assert.equal(owner.timers.size,0);
+    await next.manager.acquire(7);assert.equal(next.manager.canOperate(7),true);
+    assert.equal(backend.held.generation,2);
+});
+test("departure failure retains authorized release proof and concurrent retries send only one release",async()=>{
+    const backend=server(),owner=client(backend);await owner.manager.acquire(7);
+    backend.badRelease=true;assert.equal(await owner.manager.leave(),false);assert.ok(backend.held);
+    assert.equal(owner.timers.size,0);
+    backend.badRelease=false;const before=backend.calls.filter(c=>c.url.endsWith('/release/')).length;
+    assert.deepEqual(await Promise.all([owner.manager.leave(),owner.manager.leave()]),[true,true]);
+    assert.equal(backend.calls.filter(c=>c.url.endsWith('/release/')).length,before+1);
+    assert.equal(backend.held,null);
+});
+test("departure waits for renewal before releasing and BFCache can reacquire immediately",async()=>{
+    const backend=server(),original=backend.fetch,gate=deferred();let delay=false;
+    backend.fetch=async(url,options)=>{if(delay&&url.endsWith('/renew/'))await gate.promise;return original(url,options);};
+    const c=client(backend);await c.manager.acquire(7);delay=true;
+    const renewal=c.manager.renew();await tick();const departure=c.manager.leave();await tick();
+    assert.equal(backend.calls.filter(c=>c.url.endsWith('/release/')).length,0);
+    gate.resolve();await renewal;assert.equal(await departure,true);
+    await c.manager.resume();await c.manager.acquire(7);
+    assert.equal(c.manager.canOperate(7),true);assert.equal(backend.held.generation,2);
+});

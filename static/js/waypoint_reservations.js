@@ -308,13 +308,17 @@
             // Best effort only; do not release a lease while work is still outstanding.
             intent++;
             active = null;
+            const releases = [];
             for (const entry of entries) {
                 entry.closing = true; emit(entry,"closing");
                 if (!entry.busy && !entry.acquiring && entry.token) {
-                    release(entry,true);
+                    releases.push(release(entry,true));
                 }
                 // Busy work retains its heartbeat and drains through perform()'s finally.
             }
+            // Controlled navigation waits; pagehide remains best effort. Never reject
+            // an ignored pagehide promise or call a pending release twice.
+            return Promise.all(releases).then(() => entries.size === 0);
         }
         return {acquire, close, renew: () => renew(), perform, status, canOperate,
             snapshot: () => snapshot(), suspend, resume, leave, invalidate,
