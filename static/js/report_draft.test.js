@@ -248,3 +248,15 @@ test("technical analysis validation error retains text until corrected",async()=
     f.handler=null;f.edit({technical_analysis:"Corrigido"});await f.fire();await f.fire();
     assert.equal(f.remote.fields.technical_analysis,"Corrigido");assert.equal(f.draft.hasPending(),false);
 });
+
+test("read-only readiness snapshot distinguishes unconfirmed zero from persisted revision", async () => {
+    const f=fixture();
+    assert.equal(f.draft.snapshot().confirmed,false);
+    await f.draft.load();
+    assert.equal(f.draft.snapshot().confirmed,true);
+    assert.equal(f.draft.snapshot().revision,0);
+    f.edit({study_reason:"pending"});
+    assert.equal(f.draft.snapshot().pending,true);
+    f.draft.pause(); assert.equal(f.draft.snapshot().paused,true);
+    assert.equal(f.calls.length,1);
+});

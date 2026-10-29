@@ -54,7 +54,7 @@
             });
         }
         function reportControls(doc, allowed) {
-            controls(doc, allowed, "input[type=file], select, button:not([data-draft-retry])");
+            controls(doc, allowed, "input[type=file], select, button:not([data-draft-retry]):not([data-publication-preview-control])");
             doc.querySelectorAll("input:not([type=file]):not([type=hidden]), textarea").forEach(node => {
                 node.readOnly = !allowed; // Preserve selection/copy after losing the lease.
             });
@@ -98,7 +98,7 @@
                     report.invalidated = true; report.draft?.stop();
                 } else if (state.state === "uncertain") report.draft?.pause();
                 else report.draft?.resume();
-                const allowed = manager.canOperate(report.id) && !report.closing && !report.invalidated;
+                const allowed = manager.canOperate(report.id) && !report.closing && !report.invalidated && !report.publicationBusy;
                 report.message.textContent = state.message || labels[state.state] || "";
                 const doc = report.frame.contentDocument;
                 if (doc) reportControls(doc, allowed);
@@ -193,7 +193,7 @@
             dialog.append(closeButton,message,frame); document.body.append(dialog);
             const flow = {id, dialog, frame, message, closing:false, url}; report = flow;
             const finish = async () => {
-                if (flow.closing || flow.finishing) return false;
+                if (flow.closing || flow.finishing || flow.publicationBusy) return false;
                 flow.finishing = true;
                 try {
                     if (flow.draft?.hasPending()) {
@@ -203,6 +203,7 @@
                     }
                 } finally { flow.finishing = false; }
                 flow.closing = true; report = null;
+                flow.publicationPreview?.destroy();
                 flow.draft?.destroy();
                 flow.observer?.disconnect();
                 dialog.close(); dialog.remove();
@@ -229,9 +230,19 @@
                     win.waypointReservationRequest = request;
                     if (flow.draft) flow.draft.attach(doc);
                     else if (window.ReportDraft) flow.draft = window.ReportDraft.mount({manager,pointId:id,doc});
+                    flow.publicationPreview?.destroy();
+                    if (window.ReportPublicationPreview) flow.publicationPreview = window.ReportPublicationPreview.mount({
+                        doc, pointId:id, manager, draft:flow.draft,
+                        flowFactory:window.ReportPublicationFlow, environment:window,
+                        onBusy(busy) {
+                            flow.publicationBusy = busy;
+                            if (report === flow && !flow.closing) reportControls(doc,
+                                manager.canOperate(id) && !flow.invalidated && !busy);
+                        },
+                    });
                     flow.observer?.disconnect();
                     flow.observer = new MutationObserver(() => reportControls(doc,
-                        manager.canOperate(id) && !flow.closing && !flow.invalidated));
+                        manager.canOperate(id) && !flow.closing && !flow.invalidated && !flow.publicationBusy));
                     flow.observer.observe(doc,{subtree:true,childList:true,attributes:true,attributeFilter:["disabled"]});
                     reportControls(doc,manager.canOperate(id) && !flow.invalidated);
                     doc.addEventListener("submit",async event => {
@@ -247,7 +258,7 @@
                             return;
                         }
                         const form = event.target;
-                        if (form.dataset.sending === "true" || !manager.canOperate(id)) return;
+                        if (form.dataset.sending === "true" || flow.publicationBusy || !manager.canOperate(id)) return;
                         form.dataset.sending = "true";
                         try {
                             if (flow.draft) await flow.draft.flush();
@@ -329,7 +340,7 @@
             if (document.hidden) manager.suspend(); else manager.resume();
         });
         window.addEventListener("beforeunload",event => {
-            if (report?.draft?.hasPending()) { event.preventDefault(); event.returnValue = ""; }
+            if (report?.publicationBusy || report?.draft?.hasPending()) { event.preventDefault(); event.returnValue = ""; }
         });
         window.addEventListener("online",() => { if (report && !report.invalidated) void manager.resume(); });
         window.addEventListener("pagehide",() => manager.leave());
@@ -341,7 +352,7 @@
                     report.invalidated = true; report.draft.stop();
                     reportControls(report.frame.contentDocument,false);
                 } else {
-                    report.closing = true; report.draft?.destroy(); report.observer?.disconnect();
+                    report.closing = true; report.publicationPreview?.destroy(); report.draft?.destroy(); report.observer?.disconnect();
                     report.dialog.close(); report.dialog.remove(); report = null;
                 }
             }
@@ -350,7 +361,7 @@
         // Navigation/logout are blocked while a server operation may still be running.
         document.addEventListener("submit",event => {
             if (event.target.closest(".leaflet-popup")) return;
-            if (report?.draft?.hasPending() || manager.snapshot().busy) {
+            if (report?.publicationBusy || report?.draft?.hasPending() || manager.snapshot().busy) {
                 event.preventDefault(); event.stopImmediatePropagation();
                 notify("Conclua as operações ou encerre o relatório resolvendo as alterações pendentes antes de sair.");
             } else manager.leave();
@@ -358,7 +369,7 @@
         document.addEventListener("click",event => {
             const link = event.target.closest("a");
             if (!link || link.closest(".leaflet-popup") || link.target === "_blank" || link.getAttribute("href")?.startsWith("#")) return;
-            if (report?.draft?.hasPending() || manager.snapshot().busy) {
+            if (report?.publicationBusy || report?.draft?.hasPending() || manager.snapshot().busy) {
                 event.preventDefault(); event.stopImmediatePropagation();
                 notify("Conclua as operações ou encerre o relatório resolvendo as alterações pendentes antes de sair.");
             } else manager.leave();
@@ -373,7 +384,7 @@
                     report.invalidated = true; report.draft.stop();
                     reportControls(report.frame.contentDocument,false);
                 } else {
-                    report.closing = true; report.draft?.destroy(); report.observer?.disconnect();
+                    report.closing = true; report.publicationPreview?.destroy(); report.draft?.destroy(); report.observer?.disconnect();
                     report.dialog.close(); report.dialog.remove(); report = null;
                 }
             }

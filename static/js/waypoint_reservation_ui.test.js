@@ -341,3 +341,23 @@ test("lost reservation leaves text selectable in read-only fields",async t=>{
     f.emit({state:"lost"});
     assert.equal(text.readOnly,true);assert.equal(text.disabled,undefined);assert.equal(text.value,"Local");
 });
+
+test("publication busy fences iframe edits, DOCX and navigation without another lease",async t=>{
+    const {f,dom,draft,open}=draftUI(t);draft.pending=false;
+    let bridge;
+    f.window.ReportPublicationFlow={create(){}};
+    f.window.ReportPublicationPreview={mount(options){bridge=options;return {destroy(){}};}};
+    const {dialog,frame}=await open();
+    const submit=new Node("button"),text=new Node("textarea");
+    frame.contentDocument.querySelectorAll=selector=>selector.includes("textarea")?[text]:[submit];
+    bridge.onBusy(true);
+    assert.equal(submit.disabled,true);assert.equal(text.readOnly,true);
+    f.emit({state:"active"});assert.equal(text.readOnly,true);
+    await dialog.children[0].onclick();assert.equal(dialog.removed,undefined);
+    let prevented=false;f.windows.beforeunload({preventDefault(){prevented=true;}});assert.equal(prevented,true);
+    let posts=0;f.manager.perform=async()=>{posts++;};
+    await dom.events.submit({target:{matches:()=>true,dataset:{}},preventDefault(){}});assert.equal(posts,0);
+    bridge.onBusy(false);assert.equal(submit.disabled,false);assert.equal(text.readOnly,false);
+    await dialog.children[0].onclick();assert.equal(dialog.removed,true);
+    assert.equal(f.calls.filter(call=>call[0]==="acquire").length,1);
+});

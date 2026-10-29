@@ -397,9 +397,38 @@
                 <button class="btn btn-primary" type="submit">
                     Gerar relatório Word
                 </button>
+                {% if can_preview_publication %}
+                <button type="button" class="btn btn-outline-primary ms-2" data-publication-open data-publication-preview-control>Publicar relat&#243;rio oficial</button>
+                {% endif %}
             </form>
         {% endif %}
     </main>
+    {% if can_preview_publication %}
+    <dialog class="rounded border p-4" style="max-width: min(600px, calc(100vw - 24px));" data-publication-dialog
+            data-enabled="{{ publication_enabled|yesno:'true,false' }}"
+            data-user-id="{{ request.user.pk }}" data-url="{{ publication_url }}"
+            data-status-url="{{ publication_status_url }}" data-retry-url="{{ publication_retry_url }}"
+            data-report-url="{{ publication_report_url }}" aria-labelledby="publication-heading">
+        <h2 id="publication-heading" class="h4">Publicar relat&#243;rio oficial</h2>
+        <p>Waypoint <strong data-publication-point></strong></p>
+        <p>A publica&#231;&#227;o cria uma vers&#227;o oficial imut&#225;vel. Altera&#231;&#245;es posteriores exigir&#227;o uma nova vers&#227;o.</p>
+        <dl>
+            <dt>Autosave</dt><dd data-publication-autosave></dd>
+            <dt>Revis&#227;o persistida</dt><dd data-publication-revision></dd>
+            <dt>Fotografias selecionadas</dt><dd data-publication-photos></dd>
+        </dl>
+        <div role="status" aria-live="polite" data-publication-warnings></div>
+        <p class="small text-secondary">A confer&#234;ncia das fotos &#233; preliminar. O servidor dever&#225; revalidar permiss&#245;es, reserva, revis&#227;o e imagens antes de qualquer publica&#231;&#227;o.</p>
+        <p role="status" aria-live="polite" data-publication-result></p>
+        <a class="btn btn-outline-primary mb-2" data-publication-report-link target="_blank" rel="noopener noreferrer" hidden>Consultar relat&#243;rio publicado</a>
+        <button type="button" class="btn btn-primary" disabled data-publication-confirm data-publication-preview-control>Confirmar publica&#231;&#227;o</button>
+        <button type="button" class="btn btn-outline-primary mt-2" data-publication-recover data-publication-preview-control hidden>Recuperar tentativa</button>
+        <button type="button" class="btn btn-outline-primary mt-2" data-publication-retry data-publication-preview-control hidden>Retomar tentativa</button>
+        <button type="button" class="btn btn-outline-secondary mt-2" data-publication-new data-publication-preview-control hidden>Preparar outro relat&#243;rio</button>
+        <p class="small text-secondary mt-2">Preparar outro relat&#243;rio inicia uma nova inten&#231;&#227;o, com numera&#231;&#227;o pr&#243;pria e nova confirma&#231;&#227;o. N&#227;o retoma nem altera os registros anteriores.</p>
+        <button type="button" class="btn btn-outline-secondary mt-2" data-publication-cancel data-publication-preview-control>Cancelar e fechar</button>
+    </dialog>
+    {% endif %}
     <script src="{% static 'js/report_characterization.js' %}" defer></script>
 </body>
 </html>

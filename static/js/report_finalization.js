@@ -21,7 +21,9 @@
         const key = options.idempotencyKey || reservations.uuidV4();
         if (!uuid.test(key)) throw new Error("invalid_idempotency_key");
         const photos = [...(options.photos || [])];
-        let attempt = null, pending = null, last = null, keyConflict = false;
+        if (options.attemptId && !uuid.test(options.attemptId)) throw new Error("invalid_attempt_id");
+        let attempt = options.attemptId ? {attempt_id:options.attemptId, state:"UNKNOWN"} : null;
+        let pending = null, last = null, keyConflict = false;
         const fetcher = options.fetch || globalThis.fetch;
         const recovery = () => ({ idempotencyKey: key, attemptId: attempt?.attempt_id || null });
         function remember(data) {

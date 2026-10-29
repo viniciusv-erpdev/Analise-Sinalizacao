@@ -565,3 +565,33 @@ class SignalingReportDownloadTests(ReservationFunctionalTestMixin, TestCase):
                 self.assertEqual(response.status_code, 200)
                 self.assertIn("technical_analysis", response.context["form"].errors)
                 generator.assert_not_called()
+
+    def test_publication_preview_only_for_explicit_finalizer(self):
+        from django.contrib.auth.models import Permission
+        self.set_individual_analysis()
+        response = self.client.get(self.url)
+        self.assertNotContains(response, 'data-publication-open')
+        self.assertNotContains(response, 'data-publication-dialog')
+        self.user.user_permissions.add(Permission.objects.get(codename="finalize_technicalreport"))
+        response = self.client.get(self.url)
+        self.assertContains(response, 'data-publication-open')
+        self.assertContains(response, 'data-publication-dialog')
+        self.assertContains(response, 'disabled data-publication-confirm data-publication-preview-control')
+        self.assertContains(response, 'Gerar relat', count=None)
+        self.assertContains(response, reverse('signaling:finalize-report', args=[self.point.pk]))
+
+    def test_publication_urls_and_read_link_are_server_controlled(self):
+        from django.contrib.auth.models import Permission
+        from django.test import override_settings
+        self.set_individual_analysis([self.accident_item("synthetic-publication", year=2026)])
+        self.user.user_permissions.add(Permission.objects.get(codename="finalize_technicalreport"))
+        with override_settings(REPORT_FINALIZATION_ENABLED=True), patch("signaling.report_finalization.finalize") as publish:
+            response = self.client.get(self.url, {"analysis":"current-analysis", "year":"2026"})
+            self.assertEqual(response.status_code, 200)
+            self.assertContains(response, 'data-enabled="true"')
+            self.assertContains(response, 'data-report-url=""')
+            self.assertEqual(response.context["publication_url"], reverse("signaling:finalize-report", args=[self.point.pk]) + "?analysis=current-analysis&year=2026")
+            publish.assert_not_called()
+        self.user.user_permissions.add(Permission.objects.get(codename="view_official_reports"))
+        response = self.client.get(self.url)
+        self.assertContains(response, reverse("signaling:report-detail", args=["00000000-0000-0000-0000-000000000000"]))

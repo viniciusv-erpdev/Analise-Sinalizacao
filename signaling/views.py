@@ -1,10 +1,12 @@
 import json
 from decimal import Decimal, InvalidOperation
 
+from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.http import FileResponse, HttpRequest, JsonResponse
 from django.shortcuts import render
 from django.templatetags.static import static
+from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.http import require_POST, require_http_methods
 
@@ -131,6 +133,15 @@ def point_report(request: HttpRequest, point_id: int):
             "survey": survey,
             "form": form,
             "generated_on": timezone.localdate(),
+            "can_preview_publication": request.user.is_authenticated and request.user.has_perms((
+                "signaling.view_signalingpoint", "signaling.generate_signaling_report",
+                "signaling.finalize_technicalreport")),
+            "publication_enabled": settings.REPORT_FINALIZATION_ENABLED,
+            "publication_url": reverse("signaling:finalize-report", args=[point.pk]) + (
+                "?" + request.GET.urlencode() if request.GET else ""),
+            "publication_status_url": reverse("signaling:report-finalization-status", args=["00000000-0000-0000-0000-000000000000"]),
+            "publication_retry_url": reverse("signaling:retry-report-finalization", args=["00000000-0000-0000-0000-000000000000"]),
+            "publication_report_url": reverse("signaling:report-detail", args=["00000000-0000-0000-0000-000000000000"]) if request.user.has_perm("signaling.view_official_reports") else "",
             "chart_data_uri": chart_data_uri,
             "filter_error": filter_error,
         },

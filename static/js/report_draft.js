@@ -150,7 +150,8 @@
             retry() { if (stopped || conflict) return Promise.resolve(false); recover = true; return load(); },
             hasPending: () => dirty().length > 0 || posting,
             values: () => copy(local),
-            snapshot: () => ({state, revision, stopped, conflict}),
+            snapshot: () => ({state, revision, stopped, conflict,
+                pending: dirty().length > 0 || posting, paused, confirmed: base !== null}),
             destroy() { stopped = true; epoch++; cancel(timer); },
         };
     }
@@ -222,7 +223,7 @@
         if (!attach(doc)) return null;
         void controller.load();
         return {
-            attach, flush:controller.flush, hasPending:controller.hasPending,
+            attach, flush:controller.flush, hasPending:controller.hasPending, snapshot:controller.snapshot,
             pause:controller.pause, resume:controller.resume, stop:controller.stop,
             destroy() { controller.destroy(); attached.defaultView.waypointDraftChanged = undefined; },
         };

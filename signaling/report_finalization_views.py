@@ -31,7 +31,14 @@ def api(view):
                 result["attempt"] = service.describe(error.attempt)
             return private(JsonResponse(result, status=error.status))
         except ImproperlyConfigured:
-            return private(JsonResponse({"success": False, "code": "finalization_configuration_invalid"}, status=503))
+            import logging
+            logging.getLogger(__name__).exception(
+                "Configuração inválida durante a finalização oficial"
+            )
+            return private(JsonResponse(
+                {"success": False, "code": "finalization_configuration_invalid"},
+                status=503,
+          ))
         except (ValidationError, InvalidIndividualReportFilters, ValueError, TypeError) as error:
             result = {"success": False, "code": "invalid_finalization_payload"}
             if isinstance(error, ValidationError):
