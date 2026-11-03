@@ -23,20 +23,20 @@ test("photos counted, formats and per-file/aggregate limits validated",()=>{
     }
 });
 function node(){const events=new Map();return {events,textContent:"",disabled:false,removeAttribute(name){delete this[name];},addEventListener:(type,fn)=>events.set(type,fn),removeEventListener:type=>events.delete(type),focus(){this.focused=true;}};}
-function fixture(withFlow=false){
-    const open=node(),dialog=node(),form=node(),nodes=Object.fromEntries(["point","save-status","warnings","cancel","confirm","recover","retry","new","result","report-link"].map(k=>[k,node()]));
+function fixture(withFlow=false,initial={}){
+    const open=node(),dialog=node(),form=node(),nodes=Object.fromEntries(["point","save-status","warnings","cancel","confirm","recover","retry","result","report-link"].map(k=>[k,node()]));
     let reserved=true, snapshot=ready().draft, changed;
     dialog.dataset={enabled:"true",userId:"7",reportUrl:"/signaling/reports/00000000-0000-0000-0000-000000000000/"}; dialog.open=false;
     dialog.showModal=()=>{dialog.open=true;}; dialog.close=()=>{dialog.open=false;};
     dialog.querySelector=selector=>nodes[selector.match(/publication-(.*)\]/)[1]];
     form.querySelector=selector=>selector.includes("photos")?{files:[{size:10,type:"image/png"}]}:node();
-    const doc={body:{style:{overflow:"auto"}},querySelector:selector=>selector.includes("-new")?nodes.new:selector.includes("-open")?open:selector.includes("-dialog")?dialog:form,
+    const doc={body:{style:{overflow:"auto"}},querySelector:selector=>selector.includes("-open")?open:selector.includes("-dialog")?dialog:form,
         defaultView:{MutationObserver:class {observe(){} disconnect(){}}}};
     const manager={canOperate:()=>reserved,subscribe:fn=>{changed=fn;return ()=>{changed=null;};}};
     const draft={snapshot:()=>snapshot};
-    const actions=[], progress={supported:true,busy:false,record:null,outcome:null}; let notify;
-    const flowFactory=withFlow?{create(options){notify=options.notify;return {snapshot:()=>progress,refresh(){},
-        publish(){actions.push("publish");},recover(){actions.push("recover");},retry(){actions.push("retry");},newReport(){actions.push("new");progress.record=null;progress.outcome=null;progress.canStartNew=false;notify(progress);}};}}:undefined;
+    const actions=[], progress={supported:true,busy:false,record:null,outcome:null}; let notify;Object.assign(progress,initial);
+    const flowFactory=withFlow?{create(options){notify=options.notify;notify(progress);return {snapshot:()=>progress,refresh(){notify(progress);},
+        publish(){actions.push("publish");},recover(){actions.push("recover");},retry(){actions.push("retry");},publishAnother(key){actions.push("another:"+key);}};}}:undefined;
     const environment={fetch:async()=>{},navigator:{},crypto:{},addEventListener(){},removeEventListener(){}};
     const controller=mount({doc,pointId:23,manager,draft,flowFactory,environment});
     return {open,dialog,nodes,controller,actions,doc,set progress(value){Object.assign(progress,value);notify(progress);},set reserved(value){reserved=value;changed();},set snapshot(value){snapshot=value;changed();}};
@@ -63,7 +63,7 @@ test("confirm is explicit, readiness guarded, and modal cannot close during publ
     f.nodes.cancel.events.get("click")();assert.equal(f.dialog.open,true);
     f.progress={busy:false};f.reserved=false;assert.equal(f.nodes.confirm.disabled,true);
 });
-test("202 is not success; published number, version and authorized detail link render",()=>{
+test("202 is not success; published number and authorized detail link render without visible version",()=>{
     const f=fixture(true);f.open.events.get("click")();
     f.progress={record:{attemptId:"known",last:{attempt:{state:"PROCESSING"}}},outcome:{kind:"processing"}};
     assert.equal(f.nodes["report-link"].hidden,true);assert.equal(f.nodes.confirm.disabled,true);
@@ -99,7 +99,7 @@ test("success removes redundant modal actions; reopening never starts a new inte
     const f=fixture(true); f.open.events.get("click")();
     f.progress={canStartNew:true,record:{last:{kind:"published"}},outcome:{kind:"published",attempt:{report_id:"id",number:"RTSV-2026-0001",version:1}}};
     for (const key of ["confirm","recover","retry"]) assert.equal(f.nodes[key].hidden,true);
-    assert.equal(f.nodes.new.hidden,false);
+    assert.equal(f.nodes.new,undefined);
     f.nodes.cancel.events.get("click")(); f.open.events.get("click")();
     assert.deepEqual(f.actions,[]);
 });
@@ -115,11 +115,52 @@ test("ambiguous result offers verification; only confirmed failed attempt offers
     assert.equal(f.nodes.retry.hidden,true); assert.equal(f.nodes.recover.hidden,true);
 });
 
-test("explicit new preparation outside modal clears only resolved intent and never publishes",async()=>{
-    const f=fixture(true); f.open.events.get("click")();
-    f.progress={canStartNew:true,record:{last:{kind:"published"}},outcome:{kind:"published",attempt:{report_id:"id",number:"RTSV-2026-0001",version:1}}};
-    f.nodes.cancel.events.get("click")();
-    await f.nodes.new.events.get("click")();
-    assert.deepEqual(f.actions,["new"]); assert.equal(f.dialog.open,true);
-    assert.equal(f.nodes.confirm.hidden,false); assert.equal(f.nodes.confirm.disabled,false);
+
+const previousKey="11111111-1111-4111-8111-111111111111";
+const settled=()=>({canStartNew:true,record:{key:previousKey,last:{kind:"published",attempt:{report_id:"id",number:"RTSV-2026-0001",version:1}}},outcome:{kind:"published",attempt:{report_id:"id",number:"RTSV-2026-0001",version:1}}});
+test("first render sees restored journal despite synchronous create notification",()=>{
+    const f=fixture(true,settled());
+    assert.match(f.nodes.result.textContent,/RTSV-2026-0001/);
+    assert.equal(f.nodes.confirm.hidden,true);
+    assert.doesNotMatch(f.nodes.result.textContent,/vers\u00e3o/i);
+    assert.deepEqual(f.actions,[]);
+});
+test("main action offers explicit independent publication; cancel does not reset or send",async()=>{
+    const f=fixture(true,settled());
+    f.open.events.get("click")();assert.equal(f.nodes.confirm.hidden,false);
+    assert.match(f.nodes.confirm.textContent,/nova publica/);
+    assert.match(f.nodes.result.textContent,/outro relat.*independente/);
+    assert.match(f.nodes.result.textContent,/novo n/);
+    f.nodes.cancel.events.get("click")();assert.deepEqual(f.actions,[]);
+    f.open.events.get("click")();await f.nodes.confirm.events.get("click")();
+    assert.deepEqual(f.actions,["another:"+previousKey]);
+});
+test("restored 202 and recoverable failure offer recovery, never independent confirmation",()=>{
+    for(const state of ["PROCESSING","FAILED","INTERRUPTED"]){
+        const kind=state==="PROCESSING"?"processing":"retry_required";
+        const f=fixture(true,{canStartNew:state!=="PROCESSING",record:{key:previousKey,attemptId:"id",last:{kind,code:"conversion_failed",attempt:{state}}},outcome:{kind}});
+        f.open.events.get("click")();assert.equal(f.nodes.confirm.hidden,true);
+        assert.equal(f.nodes.recover.hidden,false);
+        assert.equal(f.nodes.retry.hidden,state==="PROCESSING");assert.deepEqual(f.actions,[]);
+    }
+});
+test("known definitive terminal failure permits specific new-publication confirmation",()=>{
+    const f=fixture(true,{canStartNew:true,record:{key:previousKey,attemptId:"id",last:{kind:"error",code:"report_source_changed",attempt:{state:"FAILED",number:"RTSV-2026-0001"}}},outcome:{kind:"error",code:"report_source_changed"}});
+    f.open.events.get("click")();assert.equal(f.nodes.confirm.hidden,false);
+    assert.match(f.nodes.result.textContent,/novo n/);assert.equal(f.nodes.retry.hidden,true);
+});
+test("restored forbidden or deleted result never clears intent or offers a new confirmation",()=>{
+    for(const code of ["report_deleted","finalization_not_found","permission_denied"]){
+        const kind=code==="permission_denied"?"forbidden":"error";
+        const f=fixture(true,{canStartNew:false,record:{key:previousKey,attemptId:"id",last:{kind,code}},outcome:{kind,code}});
+        f.open.events.get("click")();assert.equal(f.nodes.confirm.hidden,true);
+        assert.match(f.nodes.result.textContent,code==="report_deleted"?/exclu/:code==="finalization_not_found"?/inacess/:/Permiss/);
+        f.nodes.cancel.events.get("click")();assert.deepEqual(f.actions,[]);
+    }
+});
+
+test("HTTP409 status description keeps definitive failure eligible via attempt error_code",()=>{
+    const f=fixture(true,{canStartNew:true,record:{key:previousKey,attemptId:"id",last:{kind:"conflict",code:"request_failed",attempt:{state:"FAILED",error_code:"report_source_changed"}}},outcome:{kind:"conflict",code:"request_failed",attempt:{state:"FAILED",error_code:"report_source_changed"}}});
+    f.open.events.get("click")();assert.equal(f.nodes.confirm.hidden,false);
+    assert.equal(f.nodes.retry.hidden,true);assert.match(f.nodes.result.textContent,/novo n/);
 });

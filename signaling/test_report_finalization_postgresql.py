@@ -442,3 +442,28 @@ class ReportFinalizationPostgreSQLTests(TransactionTestCase):
         self.assertEqual(attempt.idempotency_key, self.key)
         self.assertEqual(attempt.version.artifacts.get(kind="PHOTO").storage_key, old_key)
         self.assertTrue(PrivateReportStorage().read(photo))
+
+    def test_same_waypoint_independent_publications_and_deletion_preserve_other_report(self):
+        first = self.post()
+        self.assertEqual(first.status_code, 201)
+        next_key = uuid4()
+        second = self.post(key=next_key)
+        self.assertEqual(second.status_code, 201)
+        self.assertNotEqual(first.json()["report_id"], second.json()["report_id"])
+        self.assertNotEqual(first.json()["number"], second.json()["number"])
+        self.assertEqual(first.json()["version"], 1)
+        self.assertEqual(second.json()["version"], 1)
+        self.assertEqual(self.post().status_code, 200)
+        from django.contrib.auth import get_user_model
+        user = get_user_model().objects.get(pk=self.user_id)
+        user.user_permissions.add(Permission.objects.get(codename="delete_official_reports"))
+        removed = self.client_for_thread().post(reverse("signaling:delete-official-report", args=[first.json()["report_id"]]),
+            {"operation_id":str(uuid4()), "confirm_number":first.json()["number"]}, content_type="application/json")
+        self.assertEqual(removed.status_code, 200)
+        survivor = TechnicalReport.objects.get(pk=second.json()["report_id"])
+        self.assertEqual(survivor.versions.get().version, 1)
+        for artifact in survivor.versions.get().artifacts.all():
+            self.assertTrue(PrivateReportStorage().read(artifact))
+        self.assertEqual(self.post().status_code, 410)
+        self.assertEqual(self.post(key=next_key).json()["report_id"], str(survivor.pk))
+        self.assertEqual(TechnicalReport.objects.count(), 1)

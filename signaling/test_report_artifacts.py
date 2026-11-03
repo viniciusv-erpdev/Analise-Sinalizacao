@@ -134,7 +134,7 @@ class ReportArtifactTests(ReportDataMixin, TestCase):
 
     def test_version_card_actions_and_photo_count(self):
         response = self.client.get(reverse("signaling:report-detail", args=[self.report.pk]))
-        self.assertContains(response, 'class="report-version report-version--latest"', count=1)
+        self.assertContains(response, 'class="report-version"', count=1)
         self.assertContains(response, 'Visualizar relat&#243;rio')
         self.assertContains(response, 'Baixar PDF')
         self.assertContains(response, 'Baixar DOCX')

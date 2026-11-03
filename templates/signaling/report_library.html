@@ -15,7 +15,7 @@
     {% include "includes/navbar.html" %}
     <main class="report-library" id="main-content">
         <header class="report-library__heading">
-            <div><h1>Relat&#243;rios oficiais</h1><p>Consulte os relat&#243;rios publicados e sua vers&#227;o oficial mais recente.</p></div>
+            <div><h1>Relat&#243;rios oficiais</h1><p>Consulte os relat&#243;rios oficiais publicados.</p></div>
             <a class="report-library__back" href="{% url 'analysis' %}"><span aria-hidden="true">&#8592;</span> Voltar ao mapa</a>
         </header>
         {% if can_delete_reports %}
@@ -42,7 +42,7 @@
             <div class="report-library__table" tabindex="0" role="region" aria-label="Relat&#243;rios publicados">
                 <table>
                     <caption class="visually-hidden">Relat&#243;rios oficiais publicados</caption>
-                    <thead><tr><th scope="col">N&#250;mero oficial</th><th scope="col">Emiss&#227;o (S&#227;o Paulo)</th><th scope="col">Autor</th><th scope="col">Waypoint de origem</th><th scope="col">Vers&#227;o</th></tr></thead>
+                    <thead><tr><th scope="col">N&#250;mero oficial</th><th scope="col">Emiss&#227;o (S&#227;o Paulo)</th><th scope="col">Autor</th><th scope="col">Waypoint de origem</th></tr></thead>
                     <tbody>
                     {% for row in page_obj %}
                         <tr>
@@ -50,10 +50,9 @@
                             <td>{% timezone "America/Sao_Paulo" %}{{ row.published_issued_at|date:"d/m/Y H:i" }}{% endtimezone %}</td>
                             <td>{{ row.historical_author.username|default:row.historical_author.full_name|default:"Não informado" }}</td>
                             <td>{{ row.waypoint_history.id|default:"Não informado" }}</td>
-                            <td>{{ row.published_version }}</td>
                         </tr>
                     {% empty %}
-                        <tr><td colspan="5">Nenhum relat&#243;rio oficial encontrado.</td></tr>
+                        <tr><td colspan="4">Nenhum relat&#243;rio oficial encontrado.</td></tr>
                     {% endfor %}
                     </tbody>
                 </table>

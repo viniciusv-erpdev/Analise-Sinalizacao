@@ -36,6 +36,7 @@
             notify(snapshot());
         }
         function canStartNew() {
+            if (record?.last?.kind === "forbidden" || ["report_deleted", "finalization_not_found", "idempotency_key_conflict"].includes(record?.last?.code)) return false;
             return record?.safeToReplace === true || record?.last?.kind === "published" ||
                 ["FAILED","INTERRUPTED"].includes(record?.last?.attempt?.state) ||
                 (!record?.attemptId && record?.last?.kind === "conflict" && record?.last?.code === "draft_revision_conflict");
@@ -90,20 +91,46 @@
             notify(snapshot());
             return pending;
         }
+        async function publishFresh() {
+            requireReady();
+            if (!await draft.flush()) throw fault("autosave_failed");
+            const state = requireReady(), files = [...photos()];
+            const hashes = await fingerprints(files);
+            if (requireReady().revision !== state.revision || files.some((file,index) => file !== photos()[index]) || files.length !== photos().length) throw fault("source_changed");
+            const value = {schema:1,userId,pointId,key:reservations.uuidV4(crypto),revision:state.revision,
+                url:options.url,photos:hashes,attemptId:null,last:{kind:"uncertain",code:"confirmation_pending"}};
+            // Atomic replacement of the settled local record: no removeItem gap.
+            write(value);
+            return saveResult(await client(value,files).submit(), true);
+        }
+        async function recheckPrevious() {
+            if (!canStartNew()) throw fault("unresolved_intent");
+            if (record.attemptId) {
+                const wasPublished = record.last.kind === "published";
+                const current = await client(record,[]).check(); saveResult(current);
+                // A newly discovered publication must be shown before another confirmation.
+                if (current.kind === "published" && !wasPublished) return current;
+                if (current.kind !== "published" && !(["retry_required","conflict"].includes(current.kind) && ["FAILED","INTERRUPTED"].includes(current.attempt?.state))) throw fault("unresolved_intent");
+            }
+            return null;
+        }
         refresh();
         return {
             snapshot, refresh,
             publish() { return run(async () => {
                 if (record) { outcome = record.last; return {kind:"existing_intent"}; }
-                requireReady();
-                if (!await draft.flush()) throw fault("autosave_failed");
-                const state = requireReady(), files = [...photos()];
-                const hashes = await fingerprints(files);
-                if (requireReady().revision !== state.revision || files.some((file,index) => file !== photos()[index]) || files.length !== photos().length) throw fault("source_changed");
-                const value = {schema:1,userId,pointId,key:reservations.uuidV4(crypto),revision:state.revision,
-                    url:options.url,photos:hashes,attemptId:null,last:{kind:"uncertain",code:"confirmation_pending"}};
-                write(value);
-                return saveResult(await client(value,files).submit(), true);
+                return publishFresh();
+            }); },
+            publishAnother(expectedKey) { return run(async () => {
+                // Bind confirmation to the journal the user saw. A second tab cannot
+                // turn its stale confirmation into yet another independent report.
+                if (!uuid.test(expectedKey) || record?.key !== expectedKey) {
+                    outcome = record?.last || {kind:"blocked",code:"unresolved_intent"};
+                    return {kind:"existing_intent"};
+                }
+                const current = await recheckPrevious();
+                if (current) return current;
+                return publishFresh(); // same run/Web Lock through validation, write and POST
             }); },
             recover() { return run(async () => {
                 if (!record) throw fault("intent_missing");
@@ -122,13 +149,8 @@
                 return saveResult(await intent.retry());
             }); },
             newReport() { return run(async () => {
-                if (!canStartNew()) throw fault("unresolved_intent");
-                if (record.attemptId) {
-                    const wasPublished = record.last.kind === "published";
-                    const current = await client(record,[]).check(); saveResult(current);
-                    if (current.kind === "published" && !wasPublished) return current;
-                    if (current.kind !== "published" && !["FAILED","INTERRUPTED"].includes(current.attempt?.state)) throw fault("unresolved_intent");
-                }
+                const current = await recheckPrevious();
+                if (current) return current;
                 // A pre-capture draft_revision_conflict without an attempt is definitive:
                 // the server checks existing keys before validating that revision.
                 storage.removeItem(journalKey); record = null; outcome = null;

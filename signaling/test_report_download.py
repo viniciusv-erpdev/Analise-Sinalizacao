@@ -612,7 +612,7 @@ class SignalingReportDownloadTests(ReservationFunctionalTestMixin, TestCase):
         self.assertContains(response, 'Publicar relat&#243;rio oficial')
         self.assertContains(response, 'Gerar relat')
 
-    def test_publication_modal_has_only_save_badge_and_new_action_outside(self):
+    def test_publication_modal_has_only_save_badge_and_two_main_actions(self):
         from django.contrib.auth.models import Permission
         self.set_individual_analysis()
         self.user.user_permissions.add(Permission.objects.get(codename="finalize_technicalreport"))
@@ -620,8 +620,10 @@ class SignalingReportDownloadTests(ReservationFunctionalTestMixin, TestCase):
         self.assertContains(response, 'data-publication-save-status', count=1)
         for marker in ['data-publication-autosave', 'data-publication-revision', 'data-publication-photos', 'Preparar outro', 'A confer&#234;ncia das fotos']:
             self.assertNotContains(response, marker)
-        html = response.content.decode()
-        self.assertLess(html.index('data-publication-new'), html.index('</form>'))
+        self.assertNotContains(response, 'data-publication-new')
+        self.assertNotContains(response, 'Preparar nova')
+        self.assertContains(response, 'relat&#243;rio oficial imut&#225;vel')
+        self.assertContains(response, 'novo n&#250;mero oficial')
         self.assertContains(response, 'Verificar publica&#231;&#227;o')
         self.assertContains(response, 'report-primary-actions')
 

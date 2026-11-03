@@ -15,12 +15,12 @@
 {% include "includes/navbar.html" %}
 <main class="report-library" id="main-content">
     <header class="report-library__heading">
-        <div><h1>{{ report.official_number }}</h1><span class="report-version__badge">Publicado</span><p>Hist&#243;rico de vers&#245;es oficialmente publicadas.</p></div>
+        <div><h1>{{ report.official_number }}</h1><span class="report-version__badge">Publicado</span><p>Documento oficial e informa&#231;&#245;es da publica&#231;&#227;o.</p></div>
         <a class="report-library__back" href="{% url 'signaling:report-library' %}{% if library_return_query %}?{{ library_return_query }}{% endif %}"><span aria-hidden="true">&#8592;</span> Voltar aos relat&#243;rios</a>
     </header>
     <dl class="report-library__metadata">
         <dt>Waypoint de origem</dt><dd>{{ report.waypoint_history.id|default:"Não informado" }}</dd>
-        <dt>&#218;ltima vers&#227;o publicada</dt><dd>{{ latest_version.version }}</dd>
+        {% if versions|length > 1 %}<dt>&#218;ltima vers&#227;o publicada</dt><dd>{{ latest_version.version }}</dd>{% endif %}
         <dt>Emiss&#227;o (S&#227;o Paulo)</dt><dd>{% timezone "America/Sao_Paulo" %}{{ latest_version.issued_at|date:"d/m/Y H:i" }}{% endtimezone %}</dd>
         <dt>Autor</dt><dd>{{ latest_version.author_identity.username|default:latest_version.author_identity.full_name|default:"Não informado" }}</dd>
     </dl>
@@ -30,7 +30,7 @@
         <button class="report-delete__danger" type="button" data-delete-open aria-haspopup="dialog" aria-controls="report-delete-dialog" hidden><img src="{% static 'icons/signaling/delete-signal-icon.svg' %}" width="20" height="20" alt="" aria-hidden="true"> Excluir relat&#243;rio</button>
         <dialog id="report-delete-dialog" class="report-delete__dialog" data-delete-dialog aria-labelledby="delete-heading" aria-describedby="delete-warning">
             <header><button type="button" class="report-delete__cancel" data-delete-cancel>Cancelar</button><h2 id="delete-heading">Excluir {{ report.official_number }}</h2></header>
-            <p id="delete-warning">A exclus&#227;o &#233; permanente. Todas as vers&#245;es e os arquivos associados ser&#227;o removidos. O n&#250;mero oficial n&#227;o ser&#225; reutilizado.</p>
+            <p id="delete-warning">A exclus&#227;o &#233; permanente. O relat&#243;rio e todos os documentos e arquivos associados ser&#227;o removidos. O n&#250;mero oficial n&#227;o ser&#225; reutilizado.</p>
             <form data-delete-form>
                 {% csrf_token %}
                 <label for="delete-number">Digite exatamente {{ report.official_number }} para confirmar:</label>
@@ -47,12 +47,13 @@
     </section>
     {% endif %}
     <section class="report-versions" aria-labelledby="versions-heading">
-        <h2 id="versions-heading">Vers&#245;es publicadas</h2>
+        <h2 id="versions-heading">{% if versions|length > 1 %}Hist&#243;rico de vers&#245;es{% else %}Documento publicado{% endif %}</h2>
+        {% if versions|length > 1 %}<details><summary>Consultar {{ versions|length }} vers&#245;es publicadas</summary><div class="report-versions">{% endif %}
         {% for version in versions %}
-        <article class="report-version{% if version.pk == latest_version.pk %} report-version--latest{% endif %}" aria-labelledby="version-{{ version.pk }}">
+        <article class="report-version{% if versions|length > 1 and version.pk == latest_version.pk %} report-version--latest{% endif %}" aria-labelledby="version-{{ version.pk }}">
             <header class="report-version__heading">
-                <h3 id="version-{{ version.pk }}">Vers&#227;o {{ version.version }}</h3>
-                {% if version.pk == latest_version.pk %}<span class="report-version__badge">Mais recente</span>{% endif %}
+                <h3 id="version-{{ version.pk }}">{% if versions|length > 1 %}Vers&#227;o {{ version.version }}{% else %}Relat&#243;rio oficial{% endif %}</h3>
+                {% if versions|length > 1 and version.pk == latest_version.pk %}<span class="report-version__badge">Mais recente</span>{% endif %}
             </header>
             <dl class="report-version__metadata">
                 <div><dt>Emiss&#227;o (S&#227;o Paulo)</dt><dd>{% timezone "America/Sao_Paulo" %}<time datetime="{{ version.issued_at|date:'c' }}">{{ version.issued_at|date:"d/m/Y H:i" }}</time>{% endtimezone %}</dd></div>
@@ -86,6 +87,7 @@
             </details>
         </article>
         {% endfor %}
+        {% if versions|length > 1 %}</div></details>{% endif %}
     </section>
 </main>
 <script src="{% static 'js/report_detail.js' %}" defer></script>

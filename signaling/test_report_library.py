@@ -203,3 +203,10 @@ class ReportLibraryTests(ReportDataMixin, TestCase):
         returned = next(link for link in links if link.path == self.url and link.query)
         self.assertEqual(parse_qs(returned.query),parse_qs(detail.query))
         self.assertNotIn("next",parse_qs(returned.query))
+
+    def test_version_column_is_hidden_without_changing_latest_version_selection(self):
+        self.make_version(self.report, 2)
+        response = self.client.get(self.url)
+        self.assertNotContains(response, '<th scope="col">Vers&#227;o</th>')
+        self.assertEqual(self.rows(response)[0].published_version, 2)
+        self.assertContains(response, 'RTSV-2026-0001')

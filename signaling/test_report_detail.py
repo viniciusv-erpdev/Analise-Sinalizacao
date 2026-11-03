@@ -113,3 +113,19 @@ class ReportDetailTests(ReportDataMixin, TestCase):
         self.assertContains(response, 'data-deletion-recovery')
         self.assertContains(response, 'data-library-url="/signaling/reports/?year=2026"')
         self.assertContains(response, 'js/report_deletion.js')
+
+    def test_single_published_document_does_not_present_versioning(self):
+        response = self.client.get(self.detail_url())
+        for text in ('Vers&#227;o 1', 'Mais recente', '&#218;ltima vers&#227;o publicada', 'Hist&#243;rico de vers&#245;es'):
+            self.assertNotContains(response, text)
+        self.assertContains(response, 'Documento publicado')
+        self.assertContains(response, 'Relat&#243;rio oficial')
+        self.assertEqual(response.context["versions"][0].version, 1)
+
+    def test_multiple_published_versions_remain_in_collapsible_history(self):
+        self.make_version(self.report, 2, issued=self.instant + timedelta(days=1))
+        response = self.client.get(self.detail_url())
+        self.assertContains(response, '<summary>Consultar 2 vers&#245;es publicadas</summary>', html=True)
+        self.assertContains(response, 'Vers&#227;o 1')
+        self.assertContains(response, 'Vers&#227;o 2')
+        self.assertContains(response, 'Mais recente', count=1)

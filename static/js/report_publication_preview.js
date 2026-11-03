@@ -32,8 +32,8 @@
         const dialog = doc.querySelector("[data-publication-dialog]");
         const form = doc.querySelector("[data-waypoint-report-form]");
         if (!open || !dialog || !form) return null;
-        const field = name => name === "new" ? doc.querySelector("[data-publication-new]") : dialog.querySelector(`[data-publication-${name}]`);
-        let flow = null, destroyed = false;
+        const field = name => dialog.querySelector(`[data-publication-${name}]`);
+        let flow = null, destroyed = false, confirmationKey = null;
         const files = () => Array.from(form.querySelector('[name="photos"]')?.files || []);
         function readiness() {
             const state = evaluate({authorized:true, reserved:manager.canOperate(pointId),
@@ -65,8 +65,16 @@
             reservation_required:"Reserva ausente ou expirada. Use o fluxo normal do waypoint antes de retomar.",
             unresolved_intent:"A tentativa ainda n\u00e3o permite uma nova inten\u00e7\u00e3o. Consulte seu estado antes de continuar.",
             journal_invalid:"O registro local da tentativa est\u00e1 inconsistente. Solicite revis\u00e3o sem apagar uma chave incerta.",
+            report_deleted:"Este relat\u00f3rio foi exclu\u00eddo. A inten\u00e7\u00e3o anterior foi preservada; solicite orienta\u00e7\u00e3o antes de iniciar outra.",
+            finalization_not_found:"A tentativa n\u00e3o foi encontrada ou est\u00e1 inacess\u00edvel. O resultado anterior continua sem confirma\u00e7\u00e3o; preserve a inten\u00e7\u00e3o e confira seu acesso.",
             autosave_failed:"O autosave n\u00e3o foi conclu\u00eddo. Nenhuma nova publica\u00e7\u00e3o foi solicitada.",
         };
+        function eligible(progress) {
+            const record = progress?.record, last = record?.last;
+            return !!progress?.canStartNew && (last?.kind === "published" || record?.safeToReplace === true ||
+                (!record?.attemptId && last?.code === "draft_revision_conflict") ||
+                ["report_source_changed","snapshot_integrity_failed","waypoint_not_found"].includes(last?.attempt?.error_code || last?.code));
+        }
         function update() {
             if (destroyed) return;
             const state = readiness(), progress = flow?.snapshot();
@@ -77,33 +85,41 @@
             field("warnings").textContent = state.warnings.join(" ");
             if (!field("confirm")) return; // Graceful preview if the activation module is unavailable.
             const busy = !!progress?.busy, record = progress?.record, outcome = progress?.outcome;
-            field("confirm").disabled = !state.ready || !progress?.supported || busy || !!record || ["journal_unavailable","journal_invalid"].includes(outcome?.code) || !!manager.snapshot?.().busy;
+            const replacing = !!confirmationKey && record?.key === confirmationKey && eligible(progress);
+            field("confirm").textContent = replacing ? "Confirmar nova publica\u00e7\u00e3o" : "Confirmar publica\u00e7\u00e3o";
+            field("confirm").disabled = !state.ready || !progress?.supported || busy || (!!record && !replacing) || ["journal_unavailable","journal_invalid"].includes(outcome?.code) || !!manager.snapshot?.().busy;
             field("cancel").disabled = busy;
             const published = outcome?.kind === "published";
-            const definitive = ["report_source_changed", "snapshot_integrity_failed", "waypoint_not_found", "idempotency_key_conflict"].includes(outcome?.code);
-            field("confirm").hidden = busy || !!record;
-            field("recover").hidden = busy || !record || published || definitive;
+            const errorCode = outcome?.attempt?.error_code || outcome?.code;
+            const definitive = ["report_source_changed", "snapshot_integrity_failed", "waypoint_not_found", "idempotency_key_conflict"].includes(errorCode);
+            field("confirm").hidden = busy || (!!record && !replacing);
+            field("recover").hidden = busy || !record || published || definitive || record?.last?.code === "report_deleted";
 
             field("recover").disabled = busy || dialog.dataset.enabled !== "true" || (!record?.attemptId && !state.ready);
             field("retry").hidden = busy || published || definitive || !["FAILED","INTERRUPTED"].includes(record?.last?.attempt?.state);
             field("retry").disabled = busy || !state.ready || record?.last?.code === "idempotency_key_conflict";
-            field("new").hidden = busy || !progress?.canStartNew;
-            field("new").disabled = busy || dialog.dataset.enabled !== "true";
             const result = field("result");
+            const previousFault = ["report_deleted","finalization_not_found"].includes(record?.last?.code) ? faults[record.last.code] :
+                record?.last?.kind === "forbidden" ? messages.forbidden : null;
             result.textContent = busy ? "Publica\u00e7\u00e3o em andamento. Aguarde a confirma\u00e7\u00e3o do servidor." :
-                outcome ? (faults[outcome.code] || messages[outcome.kind] || "Tentativa preservada. Consulte o estado antes de continuar.") :
+                outcome ? (previousFault || faults[outcome.code] || messages[outcome.kind] || "Tentativa preservada. Consulte o estado antes de continuar.") :
                 !progress?.supported ? faults.browser_protection_unavailable :
-                state.ready ? "Pronto para publicar. Confirme para criar a vers\u00e3o oficial." : "A publica\u00e7\u00e3o ainda n\u00e3o est\u00e1 pronta.";
-            if (!busy && ["report_source_changed","snapshot_integrity_failed","waypoint_not_found"].includes(outcome?.code)) {
+                state.ready ? "Pronto para publicar. Confirme para criar o relat\u00f3rio oficial." : "A publica\u00e7\u00e3o ainda n\u00e3o est\u00e1 pronta.";
+            if (!busy && ["report_source_changed","snapshot_integrity_failed","waypoint_not_found"].includes(errorCode)) {
                 result.textContent = "Falha definitiva desta tentativa: a origem mudou ou n\u00e3o est\u00e1 dispon\u00edvel. O snapshot anterior foi preservado. Revise os dados antes de preparar outro relat\u00f3rio.";
             }
             const link = field("report-link"); link.hidden = true; link.removeAttribute("href");
             if (outcome?.kind === "published" && outcome.attempt?.report_id) {
-                result.textContent += ` ${outcome.attempt.number}, vers\u00e3o ${outcome.attempt.version}.`;
+                result.textContent += ` ${outcome.attempt.number}.`;
                 if (dialog.dataset.reportUrl) {
                     link.href = dialog.dataset.reportUrl.replace("00000000-0000-0000-0000-000000000000",outcome.attempt.report_id);
                     link.hidden = false;
                 }
+            }
+            if (replacing && !busy) {
+                const previous = record.last?.attempt?.number;
+                result.textContent += previous ? ` J\u00e1 existe a publica\u00e7\u00e3o ${previous}.` : " A tentativa anterior pode ser substitu\u00edda ap\u00f3s revalida\u00e7\u00e3o.";
+                result.textContent += " Ao confirmar, ser\u00e1 criado outro relat\u00f3rio independente, com novo n\u00famero oficial. A publica\u00e7\u00e3o anterior n\u00e3o ser\u00e1 alterada.";
             }
         }
         const buttonBindings = [];
@@ -115,17 +131,18 @@
                 fetch:environment.fetch.bind(environment),photos:files,readiness,
                 attemptUrl:(id,retry) => (retry ? dialog.dataset.retryUrl : dialog.dataset.statusUrl)
                     .replace("00000000-0000-0000-0000-000000000000",id),
-                notify(progress) { if (!destroyed) { onBusy(progress.busy); update(); } },
+                notify(progress) { if (!destroyed && flow) { onBusy(progress.busy); update(); } },
             });
-            for (const [name,method] of [["confirm","publish"],["recover","recover"],["retry","retry"],["new","newReport"]]) {
+            for (const [name,method] of [["confirm","publish"],["recover","recover"],["retry","retry"]]) {
                 const button = field(name), handler = async () => {
                     if (button.disabled || button.hidden) return;
-                    await flow[method]();
-                    if (name === "new" && !flow.snapshot().record) show();
+                    if (name === "confirm" && confirmationKey) await flow.publishAnother(confirmationKey);
+                    else await flow[method]();
                 };
                 button.addEventListener("click",handler); buttonBindings.push([button,handler]);
             }
         }
+        update(); // create() has returned: first render can read the restored journal.
         const storageChanged = () => { if (!flow?.snapshot().busy) flow?.refresh(); };
         environment?.addEventListener("storage",storageChanged);
         let previousOverflow;
@@ -134,7 +151,10 @@
             previousOverflow = undefined;
         }
         function show() {
-            flow?.refresh(); update();
+            flow?.refresh();
+            const progress = flow?.snapshot();
+            confirmationKey = eligible(progress) ? progress.record.key : null;
+            update();
             if (!dialog.open) {
                 if (doc.body?.style) { previousOverflow = doc.body.style.overflow; doc.body.style.overflow = "hidden"; }
                 dialog.showModal();

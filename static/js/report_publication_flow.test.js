@@ -130,3 +130,91 @@ test("unreadable photos or storage that does not retain writes blocks publicatio
     const g=fixture();const flow=create({...g.options,storage:{getItem:()=>null,setItem(){}}});
     assert.equal((await flow.publish()).code,"journal_unavailable");assert.equal(g.calls.length,0);
 });
+
+
+test("confirmed independent report atomically replaces previous journal without deleting it",async()=>{
+    const f=fixture();await f.flow.publish();const previous=f.flow.snapshot().record.key;
+    const old=JSON.parse([...f.common.data.values()][0]);
+    f.common.storage.removeItem=()=>{throw Error("replacement must not clear journal");};
+    const original=f.common.storage.setItem;
+    f.common.storage.setItem=(name,value)=>{assert.equal(f.common.data.size,1);return original(name,value);};
+    f.respond=()=>reply({...desc("FINALIZED"),attempt_id:"33333333-3333-4333-8333-333333333333",report_id:"44444444-4444-4444-8444-444444444444",number:"RTSV-2026-0002"},201);
+    assert.equal((await f.flow.publishAnother(previous)).kind,"published");
+    assert.notEqual(f.flow.snapshot().record.key,previous);
+    assert.equal(f.flow.snapshot().record.last.attempt.number,"RTSV-2026-0002");
+    assert.equal(f.gets.length,1);assert.equal(f.calls.length,2);
+    assert.equal(f.flow.snapshot().record.schema,old.schema);
+    assert.deepEqual(Object.keys(f.flow.snapshot().record).sort(),Object.keys(old).sort());
+});
+test("replacement confirmation is bound to old key across simultaneous and sequential tabs",async()=>{
+    const a=fixture();await a.flow.publish();const previous=a.flow.snapshot().record.key;
+    const b=fixture(a.common),gate=deferred();a.respond=()=>gate.promise;
+    const first=a.flow.publishAnother(previous),duplicate=a.flow.publishAnother(previous);assert.equal(first,duplicate);
+    while(a.calls.length<2)await new Promise(r=>setImmediate(r));
+    assert.equal((await b.flow.publishAnother(previous)).code,"other_tab_busy");
+    gate.resolve(reply(desc("FINALIZED"),201));await first;
+    await b.flow.publishAnother(previous);assert.equal(b.calls.length,0);
+    assert.equal(a.calls.length,2);assert.notEqual(a.flow.snapshot().record.key,previous);
+});
+test("failed replacement preconditions never discard previous key",async()=>{
+    for(const setting of ["ready","reserved","enabled","flush"]){
+        const f=fixture();await f.flow.publish();const old=f.flow.snapshot().record.key;f[setting]=false;
+        assert.equal((await f.flow.publishAnother(old)).kind,"blocked");
+        assert.equal(f.flow.snapshot().record.key,old);assert.equal(f.calls.length,1);
+    }
+});
+test("journal stays settled during hashing and revision changes prevent replacement",async()=>{
+    const f=fixture();await f.flow.publish();const old=f.flow.snapshot().record.key;
+    const gate=deferred();let reading=false;
+    f.files=[{size:3,type:"image/png",arrayBuffer:async()=>{reading=true;return gate.promise;}}];
+    const work=f.flow.publishAnother(old);while(!reading)await new Promise(r=>setImmediate(r));
+    assert.equal(JSON.parse([...f.common.data.values()][0]).key,old);
+    f.revision=4;gate.resolve(new Uint8Array([1,2,3]).buffer);
+    assert.equal((await work).code,"source_changed");
+    assert.equal(f.flow.snapshot().record.key,old);assert.equal(f.calls.length,1);
+});
+test("independent publication may select different photos; recovery still uses its frozen key",async()=>{
+    const f=fixture();await f.flow.publish();const old=f.flow.snapshot().record.key;
+    f.files=[new Blob(["new synthetic photo"],{type:"image/png"})];
+    f.respond=()=>{throw new TypeError("timeout after commit");};
+    assert.equal((await f.flow.publishAnother(old)).kind,"uncertain");
+    const newKey=f.flow.snapshot().record.key;assert.notEqual(newKey,old);
+    const reloaded=fixture(f.common);assert.equal(reloaded.calls.length,0);
+    assert.equal((await reloaded.flow.publishAnother(newKey)).code,"unresolved_intent");
+    assert.equal(reloaded.flow.snapshot().record.key,newKey);
+    reloaded.files=[new Blob(["new synthetic photo"],{type:"image/png"})];
+    await reloaded.flow.recover();assert.equal(reloaded.flow.snapshot().record.key,newKey);
+    assert.equal(reloaded.calls.length,1);
+});
+for(const [status,code] of [[404,"finalization_not_found"],[410,"report_deleted"],[403,"permission_denied"]])test(`replacement recheck ${status} preserves journal and blocks new key`,async()=>{
+    const f=fixture();await f.flow.publish();const key=f.flow.snapshot().record.key;
+    f.status=()=>reply({code},status);
+    assert.equal((await f.flow.publishAnother(key)).code,"unresolved_intent");
+    assert.equal(f.flow.snapshot().record.key,key);assert.equal(f.flow.snapshot().canStartNew,false);
+    assert.equal(f.flow.snapshot().record.last.code,code);assert.equal(f.calls.length,1);
+});
+test("202 or newly discovered success cannot be turned automatically into another publication",async()=>{
+    const f=fixture();await f.flow.publish();const key=f.flow.snapshot().record.key;
+    f.status=()=>reply(desc("PROCESSING"),202);
+    assert.equal((await f.flow.publishAnother(key)).code,"unresolved_intent");assert.equal(f.calls.length,1);
+    const g=fixture();g.respond=()=>reply({code:"conversion_failed",attempt:desc("FAILED")},503);
+    await g.flow.publish();const old=g.flow.snapshot().record.key;
+    assert.equal((await g.flow.publishAnother(old)).kind,"published"); // status discovers successful old attempt
+    assert.equal(g.calls.length,1);assert.equal(g.flow.snapshot().record.key,old);
+});
+
+test("replacement journal cannot be overwritten if storage fails after the previous status check",async()=>{
+    const f=fixture();await f.flow.publish();const old=f.flow.snapshot().record.key;
+    const original=f.common.storage.setItem;let writes=0;
+    f.common.storage.setItem=(name,value)=>{if(++writes===2)throw Error("quota");original(name,value);};
+    assert.equal((await f.flow.publishAnother(old)).code,"journal_unavailable");
+    assert.equal(JSON.parse([...f.common.data.values()][0]).key,old);assert.equal(f.calls.length,1);
+});
+test("eligible definitive failed attempt is revalidated before independent publication",async()=>{
+    const f=fixture();f.respond=()=>reply({code:"report_source_changed",attempt:{...desc("FAILED"),error_code:"report_source_changed"}},409);
+    await f.flow.publish();const old=f.flow.snapshot().record.key;
+    f.status=()=>reply({...desc("FAILED"),error_code:"report_source_changed"},409);
+    f.respond=()=>reply({...desc("FINALIZED"),attempt_id:"33333333-3333-4333-8333-333333333333",number:"RTSV-2026-0002"},201);
+    assert.equal((await f.flow.publishAnother(old)).kind,"published");
+    assert.notEqual(f.flow.snapshot().record.key,old);assert.equal(f.calls.length,2);
+});

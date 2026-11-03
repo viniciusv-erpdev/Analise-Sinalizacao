@@ -413,7 +413,6 @@
                 </button>
                 {% if can_preview_publication %}
                 <button type="button" class="btn btn-success report-publish-action" data-publication-open data-publication-preview-control><img src="{% static 'icons/signaling/publish-icon.svg' %}" width="20" height="20" alt="" aria-hidden="true"> Publicar relat&#243;rio oficial</button>
-                <button type="button" class="btn btn-outline-success" data-publication-new data-publication-preview-control title="Prepara um novo relat&#243;rio, com numera&#231;&#227;o pr&#243;pria e nova confirma&#231;&#227;o. N&#227;o altera a publica&#231;&#227;o anterior." hidden>Preparar nova publica&#231;&#227;o</button>
                 {% endif %}
                 </div>
             </form>
@@ -430,7 +429,7 @@
             <h2 id="publication-heading" class="h4">Publicar relat&#243;rio oficial</h2>
         </header>
         <p>Waypoint <strong data-publication-point></strong></p>
-        <p>A publica&#231;&#227;o cria uma vers&#227;o oficial imut&#225;vel. Altera&#231;&#245;es posteriores exigir&#227;o uma nova vers&#227;o.</p>
+        <p>A publica&#231;&#227;o cria um relat&#243;rio oficial imut&#225;vel. Uma nova publica&#231;&#227;o cria outro relat&#243;rio independente, com novo n&#250;mero oficial.</p>
         <p role="status" aria-live="polite">Status: <span class="report-save-status report-save-status--unsaved" data-publication-save-status>N&#227;o salvo</span></p>
         <div role="status" aria-live="polite" data-publication-warnings></div>
         <p role="status" aria-live="polite" data-publication-result></p>
