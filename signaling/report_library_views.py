@@ -6,7 +6,7 @@ from django.shortcuts import render
 from django.views.decorators.cache import never_cache
 from django.views.decorators.vary import vary_on_cookie
 from django.views.decorators.http import require_GET
-from signaling.report_read_access import can_view_official_reports
+from signaling.report_read_access import can_view_official_reports, can_delete_official_reports
 from signaling.report_library import OfficialReportFilters, report_rows
 
 
@@ -40,6 +40,7 @@ def report_library(request):
     return render(request, "signaling/report_library.html", {
         "filters": form, "page_obj": page, "filter_query": query.urlencode(), "filters_valid": status == 200,
         "library_query": navigation_query.urlencode(),
+        "can_delete_reports": can_delete_official_reports(request.user),
     }, status=status)
 
 
@@ -74,8 +75,12 @@ def report_detail(request, report_id):
     for name in list(return_query):
         if name not in (*OfficialReportFilters.base_fields, "page"):
             del return_query[name]
+    deletion_query = return_query.copy()
+    deletion_query.pop("page", None)  # deleting the last row can invalidate that page
     latest = max(versions, key=lambda version: version.version)
     return render(request, "signaling/report_detail.html", {
         "report": report, "versions": versions, "latest_version": latest,
         "library_return_query": return_query.urlencode(),
+        "deletion_return_query": deletion_query.urlencode(),
+        "can_delete_reports": can_delete_official_reports(request.user),
     })

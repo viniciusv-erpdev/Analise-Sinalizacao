@@ -18,6 +18,15 @@
             <div><h1>Relat&#243;rios oficiais</h1><p>Consulte os relat&#243;rios publicados e sua vers&#227;o oficial mais recente.</p></div>
             <a class="report-library__back" href="{% url 'analysis' %}"><span aria-hidden="true">&#8592;</span> Voltar ao mapa</a>
         </header>
+        {% if can_delete_reports %}
+        <section class="report-delete-recovery" data-deletion-recovery data-user-id="{{ request.user.pk }}" data-library-url="{% url 'signaling:report-library' %}{% if filter_query %}?{{ filter_query }}{% endif %}"
+                 data-url-template="{% url 'signaling:delete-official-report' '00000000-0000-0000-0000-000000000000' %}" hidden aria-label="Recuperar exclus&#245;es pendentes">
+            {% csrf_token %}
+            <h2>Exclus&#245;es pendentes de confirma&#231;&#227;o</h2>
+            <p>Os registros podem j&#225; ter sido exclu&#237;dos. Verifique a mesma opera&#231;&#227;o para confirmar ou retomar a limpeza dos arquivos. A recupera&#231;&#227;o reenvia a exclus&#227;o j&#225; confirmada, com o mesmo identificador.</p>
+            <div data-deletion-recovery-list></div>
+        </section>
+        {% endif %}
         <form method="get" class="report-library__filters" aria-label="Filtrar relat&#243;rios">
             {% if filters.non_field_errors %}<div class="report-library__errors" role="alert">{{ filters.non_field_errors }}</div>{% endif %}
             {% for field in filters %}
@@ -60,5 +69,6 @@
             <p role="status">Revise os filtros informados para consultar os relat&#243;rios.</p>
         {% endif %}
     </main>
+{% if can_delete_reports %}<script src="{% static 'js/report_deletion.js' %}" defer></script>{% endif %}
 </body>
 </html>

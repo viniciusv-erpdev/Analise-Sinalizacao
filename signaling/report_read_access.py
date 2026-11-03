@@ -16,6 +16,11 @@ from signaling.models import (TechnicalReport, TechnicalReportVersion, ReportArt
 VIEW_OFFICIAL_REPORTS = "signaling.view_official_reports"
 DOWNLOAD_OFFICIAL_REPORTS = "signaling.download_official_reports"
 FINALIZE = "signaling.finalize_technicalreport"
+DELETE_OFFICIAL_REPORTS = "signaling.delete_official_reports"
+
+
+def can_delete_official_reports(user):
+    return _authorized(user, (DELETE_OFFICIAL_REPORTS,))
 
 
 def _authorized(user, permissions):

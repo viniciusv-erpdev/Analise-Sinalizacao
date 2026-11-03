@@ -18,7 +18,7 @@ from django.utils import timezone
 from signaling import reservations as r
 from signaling.authorization import VIEW, REPORT
 from signaling.models import (TechnicalReport, TechnicalReportVersion, ReportArtifact,
-    ReportAnnualCounter, ReportFinalizationAttempt as Attempt, WaypointReportDraft)
+    ReportAnnualCounter, ReportFinalizationAttempt as Attempt, WaypointReportDraft, DeletedReportKey)
 from signaling.pdf_conversion import (convert_docx_to_pdf, validate_pdf, ConversionOptions, PDFConversionError)
 from signaling.report_filters import parse_individual_report_filters
 from signaling.report_snapshots import (canonical, digest, point_source, validate_form, render_snapshot,
@@ -102,6 +102,8 @@ def get_attempt(attempt_id, user_id):
 
 
 def _existing(key, user_id, fingerprint):
+    if DeletedReportKey.objects.filter(key_sha256=hashlib.sha256(str(key).encode("ascii")).hexdigest()).exists():
+        raise FinalizationError("report_deleted", 410)
     attempt = Attempt.objects.select_related("version__report").filter(idempotency_key=key).first()
     if attempt:
         if attempt.requested_by_id != user_id:
@@ -175,13 +177,17 @@ def finalize(*, point_id, identity, credentials, user_id, key, expected_revision
 
 
 def _assert_run(attempt_id, execution_id):
-    attempt = Attempt.objects.select_for_update().get(pk=attempt_id)
+    attempt = Attempt.objects.select_for_update().filter(pk=attempt_id).first()
+    if attempt is None:
+        raise FinalizationError("finalization_not_found", 404)
     if attempt.execution_id != execution_id or attempt.state not in ACTIVE or attempt.deadline <= timezone.now():
         raise FinalizationError("execution_superseded", attempt=attempt)
     return attempt
 
 
 def _store(attempt, storage, kind, data, *, ordinal=0, metadata=None):
+    with transaction.atomic():
+        _assert_run(attempt.pk, attempt.execution_id)
     metadata = metadata or {}
     extension = {"PDF": "pdf", "DOCX": "docx", "PHOTO": "jpg" if metadata.get("format") == "JPEG" else "png"}[kind]
     key = f"{attempt.version_id}/{attempt.execution_id}/{uuid4()}.{extension}"
@@ -282,7 +288,9 @@ def retry(*, attempt_id, user_id, identity, credentials, photos=()):
     with r.validate_reservation(point_id=point_id, identity=identity, credentials=credentials) as point:
         if digest(_source(point, user_id)) != attempt.version.source_sha256:
             raise FinalizationError("report_source_changed", attempt=attempt)
-        current = Attempt.objects.select_for_update().get(pk=attempt_id)
+        current = Attempt.objects.select_for_update().filter(pk=attempt_id).first()
+        if current is None:
+            raise FinalizationError("finalization_not_found", 404)
         _fence(point_id, identity, credentials, user_id)
         if current.state == Attempt.State.FINALIZED:
             return get_attempt(attempt_id, user_id)

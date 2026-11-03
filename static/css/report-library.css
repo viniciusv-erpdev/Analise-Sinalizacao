@@ -68,3 +68,22 @@
 .report-library__heading > div { grid-column: 1 / -1; grid-row: 2; min-width: 0; }
 .report-library__heading > .report-library__back { grid-column: 2; grid-row: 1; justify-self: end; }
 .report-library__heading h1 { overflow-wrap: anywhere; }
+
+/* Permanent deletion: native accessible dialog, independent of map/reservations. */
+.report-delete { margin: 0 0 24px; }
+.report-library button.report-delete__danger { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; background: #b02a37; color: white; }
+.report-library button.report-delete__danger:hover { background: #842029; }
+.report-delete__danger img { filter: brightness(0) invert(1); }
+.report-library button:disabled { opacity: .55; cursor: not-allowed; }
+.report-library [hidden] { display: none !important; }
+.report-delete__dialog { box-sizing: border-box; width: min(560px, calc(100vw - 24px)); max-height: calc(100dvh - 24px); overflow: auto; padding: 24px; border: 1px solid #8295a9; border-radius: 10px; color: #25394b; }
+.report-delete__dialog::backdrop { background: rgb(0 0 0 / .45); }
+.report-delete__dialog header { display: grid; gap: 12px; }
+.report-delete__dialog header h2 { font-size: 1.4rem; overflow-wrap: anywhere; }
+.report-delete__cancel { justify-self: end; }
+.report-delete__actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.report-delete__dialog [role=status] { margin: 16px 0; }
+.report-delete-recovery { padding: 20px; margin-bottom: 20px; border: 1px solid #b58105; border-radius: 8px; background: #fff8e1; }
+.report-delete-recovery h2 { font-size: 1.2rem; }
+.report-delete-recovery article { padding: 12px 0; border-top: 1px solid #d8c596; }
+@media (max-width: 480px) { .report-delete__dialog { padding: 16px; } .report-delete__actions > * { width: 100%; } }

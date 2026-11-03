@@ -269,6 +269,7 @@ class TechnicalReport(models.Model):
             ("finalize_technicalreport", "Pode finalizar relat\u00f3rios t\u00e9cnicos"),
             ("view_official_reports", "Pode consultar relat\u00f3rios oficiais publicados"),
             ("download_official_reports", "Pode baixar arquivos de relat\u00f3rios oficiais"),
+            ("delete_official_reports", "Pode excluir definitivamente relatórios oficiais"),
         ]
         constraints = [
             models.UniqueConstraint(fields=["year", "sequence"], name="report_annual_number_unique"),
@@ -372,3 +373,35 @@ class ReportAnnualCounter(models.Model):
     class Meta:
         default_permissions = ()
         constraints = [models.CheckConstraint(condition=models.Q(last_reserved__lte=9999), name="report_counter_range")]
+
+
+class ReportDeletion(models.Model):
+    """Minimal durable audit and cleanup outbox; deliberately has no report FK."""
+    class State(models.TextChoices):
+        PENDING = "PENDING"
+        FAILED = "FAILED"
+        COMPLETE = "COMPLETE"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    report_id = models.UUIDField(unique=True)
+    official_number = models.CharField(max_length=20, unique=True)
+    deleted_at = models.DateTimeField()
+    deleted_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, on_delete=models.SET_NULL)
+    deleted_by_username = models.CharField(max_length=150)
+    cleanup_state = models.CharField(max_length=8, choices=State.choices, default=State.PENDING)
+    pending_keys = models.JSONField(default=list)
+    version_ids = models.JSONField(default=list)
+    error_code = models.CharField(max_length=40, blank=True)
+    cleanup_finished_at = models.DateTimeField(null=True)
+
+    class Meta:
+        default_permissions = ()
+
+
+class DeletedReportKey(models.Model):
+    """A one-way idempotency tombstone prevents resurrection of deleted reports."""
+    key_sha256 = models.CharField(max_length=64, primary_key=True)
+    deletion = models.ForeignKey(ReportDeletion, on_delete=models.PROTECT, related_name="retired_keys")
+
+    class Meta:
+        default_permissions = ()

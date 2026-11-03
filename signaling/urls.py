@@ -1,6 +1,7 @@
 from django.urls import path
 from signaling.report_artifact_views import report_artifact
 
+from signaling.report_deletion_views import delete_official_report
 from signaling import report_finalization_views as finalization
 from signaling.report_library_views import report_library, report_detail
 from signaling import views, reservation_views, synchronization_views, report_draft_views
@@ -10,6 +11,7 @@ app_name = "signaling"
 
 urlpatterns = [
     path("reports/", report_library, name="report-library"),
+    path("reports/<uuid:report_id>/delete/", delete_official_report, name="delete-official-report"),
     path("reports/<uuid:report_id>/versions/<int:version>/artifacts/<uuid:artifact_id>/view/", report_artifact, name="report-artifact-view"),
     path("reports/<uuid:report_id>/versions/<int:version>/artifacts/<uuid:artifact_id>/download/", report_artifact, {"download": True}, name="report-artifact-download"),
     path("reports/<uuid:report_id>/", report_detail, name="report-detail"),

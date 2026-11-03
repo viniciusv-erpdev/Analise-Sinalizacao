@@ -83,3 +83,33 @@ class ReportDetailTests(ReportDataMixin, TestCase):
         response = self.client.get(self.detail_url())
         self.assertContains(response, "&lt;script&gt;historic&lt;/script&gt;")
         self.assertNotContains(response, "<script>historic</script>")
+
+    def test_delete_controls_require_explicit_permission_without_staff(self):
+        response = self.client.get(self.detail_url())
+        self.assertNotContains(response, 'data-delete-open')
+        self.assertNotContains(response, 'js/report_deletion.js')
+        self.reader.user_permissions.add(Permission.objects.get(codename="delete_official_reports"))
+        self.reader.user_permissions.add(Permission.objects.get(codename="download_official_reports"))
+        self.assertFalse(self.reader.is_staff)
+        response = self.client.get(self.detail_url(), {"year":"2026", "page":"2"})
+        self.assertContains(response, 'data-delete-open')
+        self.assertContains(response, 'icons/signaling/delete-signal-icon.svg')
+        self.assertContains(response, 'js/report_deletion.js')
+        self.assertContains(response, 'data-delete-confirm disabled')
+        self.assertContains(response, 'data-library-url="/signaling/reports/?year=2026"')
+        self.assertEqual(response.context["library_return_query"], "year=2026&page=2")
+        self.assertEqual(response.context["deletion_return_query"], "year=2026")
+        self.assertContains(response, reverse("signaling:delete-official-report", args=[self.report.pk]))
+
+    def test_staff_alone_does_not_render_delete_controls(self):
+        self.reader.is_staff = True
+        self.reader.save(update_fields=["is_staff"])
+        self.assertNotContains(self.client.get(self.detail_url()), 'data-delete-open')
+
+    def test_recovery_area_only_for_readers_with_delete_permission(self):
+        self.assertNotContains(self.client.get(self.url), 'data-deletion-recovery')
+        self.reader.user_permissions.add(Permission.objects.get(codename="delete_official_reports"))
+        response = self.client.get(self.url, {"year":"2026"})
+        self.assertContains(response, 'data-deletion-recovery')
+        self.assertContains(response, 'data-library-url="/signaling/reports/?year=2026"')
+        self.assertContains(response, 'js/report_deletion.js')

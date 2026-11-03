@@ -217,12 +217,12 @@ class ArtifactRegistrationTests(SimpleTestCase):
         self.assertEqual(len(list(self.storage.keys())), 1)
 
     def test_ambiguous_commit_preserves_registered_file(self):
-        from contextlib import contextmanager
+        from contextlib import contextmanager, nullcontext
         @contextmanager
         def ambiguous():
             yield
             raise RuntimeError("commit acknowledgement lost")
-        with patch.object(self.service.transaction, "atomic", side_effect=ambiguous):
+        with patch.object(self.service.transaction, "atomic", side_effect=[nullcontext(), ambiguous()]):
             with self.assertRaisesRegex(RuntimeError, "acknowledgement lost"):
                 self.store()
         fields = self.create.call_args.kwargs
