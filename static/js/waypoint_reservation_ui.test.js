@@ -54,6 +54,32 @@ function fixture({change=true,occupied=false}={}) {
     return {ui,manager,point,marker,write,read,root,calls,emit,events,windows,intervals,bind,
         get renders(){return renderCount;},body,window,document};
 }
+
+test("deletion confirmation X and Escape cancel without reservation side effects; confirm still accepts",async()=>{
+    const f=fixture();
+    for (const action of ["close","escape","confirm"]) {
+        const pending=f.ui.confirm("Excluir?",{closeIcon:true});
+        const dialog=f.body.children.at(-1),[close,text,yes]=dialog.children;
+        assert.equal(close.tag,"button");assert.equal(close.type,"button");
+        assert.equal(close.textContent,"\u00d7");
+        assert.equal(close.getAttribute("aria-label"),"Fechar confirma\u00e7\u00e3o");
+        assert.equal(close.getAttribute("title"),"Fechar confirma\u00e7\u00e3o");
+        assert.match(close.className,/confirmation-close/);
+        assert.equal(text.textContent,"Excluir?");assert.equal(yes.textContent,"Confirmar");
+        if(action==="close")close.onclick();
+        else if(action==="confirm")yes.onclick();
+        else {let prevented=false;dialog.events.cancel[0]({preventDefault(){prevented=true;}});assert.equal(prevented,true);}
+        assert.equal(await pending,action==="confirm");
+        assert.equal(dialog.removed,true);assert.deepEqual(f.calls,[]);
+    }
+});
+
+test("unrelated unsaved-text confirmation retains its Cancelar control",async()=>{
+    const f=fixture(),pending=f.ui.confirm("Descartar textos?");
+    const dialog=f.body.children.at(-1);
+    assert.equal(dialog.children[0].textContent,"Cancelar");
+    dialog.children[0].onclick();assert.equal(await pending,false);
+});
 test("popup stays read-only until acquisition and refresh complete; loss disables mutations only",async()=>{
     const f=fixture();f.bind();assert.equal(f.write.disabled,true);assert.equal(f.read.disabled,false);
     await f.ui.begin(f.marker,f.point);f.bind();

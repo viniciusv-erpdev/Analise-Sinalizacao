@@ -3,6 +3,11 @@ const test=require("node:test"),assert=require("node:assert/strict"),fs=require(
 // Exercise the actual renderer in isolation from Leaflet/map initialization.
 const source=fs.readFileSync(path.join(__dirname,"signaling.js"),"utf8");
 const renderer=source.slice(source.indexOf("function buildExistingPointPopup(point)"),source.indexOf("function buildInterventionForm(point)"));
+test("waypoint and shared problem/solution deletions opt into the same close icon",()=>{
+    assert.match(source,/confirm: \(message\) => reservationUI\.confirm\(message, \{closeIcon: true\}\)/);
+    const deletion=source.slice(source.indexOf('const confirmed = await reservationUI.confirm('));
+    assert.match(deletion.slice(0,deletion.indexOf('if (!confirmed)')),/closeIcon: true/);
+});
 test("waypoint card identifies the backend record independently of marker ordering",()=>{
     const context={hasIndividualAnalysis:true,canReportSignaling:true,
         signalingStatuses:{OK:{popupLabel:"Completa",buttonClass:"btn-success",label:"Completa"}},

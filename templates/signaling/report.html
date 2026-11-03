@@ -11,6 +11,7 @@
         integrity="sha384-sRIl4kxILFvY47J16cr9ZwB07vP4J8+LH7qKQnuqkuIAvNWLzeN8tE5YBujZqJLB"
         crossorigin="anonymous"
     >
+    <link rel="stylesheet" href="{% static 'css/confirmation-controls.css' %}">
     <style>
         .report-container { max-width: 960px; }
         .report-note { white-space: pre-wrap; overflow-wrap: anywhere; }
@@ -425,7 +426,7 @@
             data-status-url="{{ publication_status_url }}" data-retry-url="{{ publication_retry_url }}"
             data-report-url="{{ publication_report_url }}" aria-labelledby="publication-heading">
         <header class="report-publication-heading">
-            <button type="button" class="btn btn-outline-secondary btn-sm" data-publication-cancel data-publication-preview-control>Cancelar e fechar</button>
+            <button type="button" class="btn btn-outline-secondary confirmation-close" aria-label="Fechar confirmação" title="Fechar confirmação" data-publication-cancel data-publication-preview-control>&times;</button>
             <h2 id="publication-heading" class="h4">Publicar relat&#243;rio oficial</h2>
         </header>
         <p>Waypoint <strong data-publication-point></strong></p>
@@ -433,8 +434,10 @@
         <p role="status" aria-live="polite">Status: <span class="report-save-status report-save-status--unsaved" data-publication-save-status>N&#227;o salvo</span></p>
         <div role="status" aria-live="polite" data-publication-warnings></div>
         <p role="status" aria-live="polite" data-publication-result></p>
-        <a class="btn btn-outline-primary mb-2" data-publication-report-link target="_top" rel="noopener noreferrer" hidden>Consultar relat&#243;rio publicado</a>
-        <button type="button" class="btn btn-primary" disabled data-publication-confirm data-publication-preview-control>Confirmar publica&#231;&#227;o</button>
+        <div class="report-publication-actions">
+        <a class="btn btn-outline-primary report-publication-action" data-publication-report-link target="_top" rel="noopener noreferrer" hidden>Consultar relat&#243;rio publicado</a>
+        <button type="button" class="btn btn-primary report-publication-action" disabled data-publication-confirm data-publication-preview-control>Confirmar publica&#231;&#227;o</button>
+        </div>
         <button type="button" class="btn btn-outline-primary mt-2" data-publication-recover data-publication-preview-control hidden>Verificar publica&#231;&#227;o</button>
         <button type="button" class="btn btn-outline-primary mt-2" data-publication-retry data-publication-preview-control hidden>Retomar tentativa</button>
 

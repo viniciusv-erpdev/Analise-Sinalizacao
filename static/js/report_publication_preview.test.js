@@ -1,6 +1,33 @@
 "use strict";
 const test=require("node:test"), assert=require("node:assert/strict");
 const {evaluate,mount}=require("./report_publication_preview.js");
+test("publication uses the shared accessible X and matching action dimensions",()=>{
+    const fs=require("node:fs"),path=require("node:path");
+    const html=fs.readFileSync(path.join(__dirname,"../../templates/signaling/report.html"),"utf8");
+    const close=html.match(/<button[^>]*data-publication-cancel[^>]*>[\s\S]*?<\/button>/g);
+    assert.equal(close.length,1);
+    assert.match(close[0],/type="button"/);assert.match(close[0],/confirmation-close/);
+    assert.match(close[0],/aria-label="Fechar confirmação"/);assert.match(close[0],/title="Fechar confirmação"/);
+    assert.match(close[0],/>&times;<\/button>/);assert.doesNotMatch(close[0],/Cancelar/);
+    for(const selector of ["report-link","confirm"]){
+        assert.match(html,new RegExp(`<(?:a|button)[^>]*class="[^"]*report-publication-action[^>]*data-publication-${selector}`));
+    }
+    const css=fs.readFileSync(path.join(__dirname,"../css/confirmation-controls.css"),"utf8");
+    assert.match(css,/\.confirmation-close:focus-visible/);
+    assert.match(html,/css\/confirmation-controls.css/);
+    const group=html.match(/<div class="report-publication-actions">([\s\S]*?)<\/div>/)[1];
+    assert.match(group,/data-publication-report-link/);
+    assert.match(group,/data-publication-confirm/);
+    assert.doesNotMatch(group,/\bmb-2\b/);
+    const layout=css.match(/\.report-publication-actions\s*\{([^}]+)\}/)[1];
+    assert.match(layout,/grid-template-columns: minmax\(0, 1fr\)/);
+    assert.match(layout,/grid-auto-rows: 1fr/);
+    assert.match(layout,/gap: 8px/);
+    const action=css.match(/\.report-publication-action\s*\{([^}]+)\}/)[1];
+    for(const rule of ["box-sizing: border-box", "width: 100%", "height: 100%", "margin: 0", "border-width: 1px", "text-align: center"]){
+        assert.ok(action.includes(rule),rule);
+    }
+});
 const ready=()=>({authorized:true,reserved:true,enabled:true,photos:[],
     draft:{state:"saved",confirmed:true,revision:0,pending:false,paused:false,stopped:false,conflict:false}});
 test("confirmed zero revision is valid; local unconfirmed revision is not",()=>{

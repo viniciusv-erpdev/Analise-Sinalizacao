@@ -782,7 +782,7 @@ function showPointPopup(marker, point) {
         canEdit: () => waypointReservations.canOperate(point.id),
         onRender: () => reservationUI.bind(marker, point),
         onBack: () => showPointPopup(marker, point),
-        confirm: (message) => reservationUI.confirm(message),
+        confirm: (message) => reservationUI.confirm(message, {closeIcon: true}),
     };
     IntersectionProblems.open({
         ...problemOptions, container: popupElement.querySelector("[data-point-problems]"),
@@ -971,7 +971,7 @@ function showPointPopup(marker, point) {
         const confirmed = await reservationUI.confirm(
             "Excluir este ponto?\n\n" +
             "Todas as sinalizações cadastradas neste local " +
-            "também serão removidas."
+            "também serão removidas.", {closeIcon: true}
         );
         if (!confirmed) {
             return;

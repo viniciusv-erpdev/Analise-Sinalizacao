@@ -222,11 +222,18 @@
             if (report?.id === id) return; // report owns the same interaction
             if (current?.point.id === id) { current = null; manager.close(); }
         }
-        async function confirm(message) {
+        async function confirm(message, {closeIcon = false} = {}) {
             const dialog = document.createElement("dialog"); dialog.className = "waypoint-confirm-dialog rounded border p-3";
             const text = document.createElement("p"); text.textContent = message;
             const yes = document.createElement("button"); yes.className = "btn btn-danger waypoint-confirm-dialog__confirm"; yes.textContent = "Confirmar";
             const no = document.createElement("button"); no.className = "btn btn-secondary waypoint-confirm-dialog__close"; no.textContent = "Cancelar";
+            yes.type = no.type = "button";
+            if (closeIcon) {
+                no.className = "btn btn-outline-secondary waypoint-confirm-dialog__close confirmation-close";
+                no.textContent = "\u00d7";
+                no.setAttribute("aria-label", "Fechar confirma\u00e7\u00e3o");
+                no.setAttribute("title", "Fechar confirma\u00e7\u00e3o");
+            }
             dialog.append(no,text,yes); document.body.append(dialog);
             return new Promise(resolve => {
                 const done = value => { dialog.close(); dialog.remove(); resolve(value); };
