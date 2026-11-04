@@ -192,6 +192,8 @@ def finalize(*, point_id, identity, credentials, user_id, key, expected_revision
 
 
 def _require_legacy_mutation():
+    from signaling.report_operations import assert_admission_allowed
+    assert_admission_allowed()
     from signaling.models import ReportPublicationSlot
     if ReportPublicationSlot.objects.filter(attempt__isnull=False).exists():
         raise FinalizationError("publication_busy")

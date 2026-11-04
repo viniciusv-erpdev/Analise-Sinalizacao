@@ -16,6 +16,7 @@ from signaling.models import ReportPublicationSlot, ReportFinalizationAttempt as
 from signaling.report_deletion import _version_keys
 from signaling.report_snapshots import digest
 from signaling.report_storage import PrivateReportStorage, ArtifactStorageError
+from signaling.models import ReportLaunch, ReportDeploymentBarrier
 
 ARTIFACT_LIMIT = 256
 NAMESPACE_LIMIT = 1024
@@ -58,7 +59,14 @@ def _metadata(attempt_id):
         identities = list(ReportExecutionIdentity.objects.filter(attempt_reference=target)
             .order_by("prepared_at").values("id", "execution_id", "host_id", "boot_id", "unit_name", "invocation_id",
                 "prepared_at", "bound_at", "main_pid", "process_start_ticks", "cgroup_inode", "release_id")[:20])
+        barrier = ReportDeploymentBarrier.objects.filter(pk=1).values("state", "generation", "updated_at").first()
+        launches = list(ReportLaunch.objects.filter(identity__attempt_reference=target).order_by("requested_at")
+            .values("id", "identity_id", "state", "requested_at", "dispatch_started_at", "job_id",
+                    "invocation_id", "confirmed_at", "terminal_observed_at")[:20])
         return {"slot": slot, "owner": owner, "attempt": attempt, "identities": identities,
+                "barrier": barrier, "launches": launches,
+                "global_launch_count": ReportLaunch.objects.count(),
+                "global_identity_count": ReportExecutionIdentity.objects.count(),
                 "artifacts": artifacts[:ARTIFACT_LIMIT], "artifacts_truncated": len(artifacts) > ARTIFACT_LIMIT,
                 "unowned_count": unowned.count(), "unowned": list(unowned.order_by("created_at", "pk")
                     .values("id", "state", "execution_id")[:UNOWNED_LIMIT])}
@@ -124,6 +132,13 @@ def diagnose(*, attempt_id=None, verify_files=False):
                  "execution_id": str(slot["execution_id"]) if slot and slot["execution_id"] else None,
                  "owner_state": owner["state"] if owner else None},
         "attempt": None, "artifacts": [], "issues": issues,
+        "operations": {"barrier": {key: str(value) if value is not None else None
+                         for key, value in (before["barrier"] or {"state": "OPEN"}).items()},
+                       "launches": [{key: str(value) if value is not None else None
+                                     for key, value in launch.items()} for launch in before["launches"]],
+                       "unverified_launch_count": before["global_launch_count"],
+                       "unverified_identity_count": before["global_identity_count"],
+                       "termination_verification": "unavailable"},
         "operational_identities": [{key: (_iso(value) if key in ("prepared_at", "bound_at") else
             str(value) if key in ("id", "execution_id", "boot_id", "invocation_id") and value is not None else value)
             for key, value in identity.items()} for identity in before["identities"]],

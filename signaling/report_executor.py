@@ -55,6 +55,8 @@ def claim(attempt_id=None, *, supervision=None):
                 raise ExecutionError("execution_not_slot_owner")
         elif slot.attempt_id is None:
             return None
+        from signaling.report_operations import assert_open
+        assert_open()
         attempt = admission.assert_execution(slot.attempt_id, slot.execution_id,
             states=(Attempt.State.ADMITTED, Attempt.State.PROCESSING, Attempt.State.STORING,
                     Attempt.State.FAILED, Attempt.State.INTERRUPTED))

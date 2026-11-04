@@ -337,6 +337,7 @@ class ReportFinalizationAttempt(models.Model):
     execution_id = models.UUIDField(default=uuid.uuid4)
     deadline = models.DateTimeField(db_index=True, null=True)
     admitted_at = models.DateTimeField(null=True, editable=False)
+    execution_contract = models.JSONField(default=dict, editable=False)
     error_code = models.CharField(max_length=80, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -428,6 +429,110 @@ class ReportExecutionIdentity(models.Model):
                            cgroup_inode__isnull=False, main_pid__isnull=False, process_start_ticks__isnull=False)
             ), name="report_identity_binding_complete"),
         ]
+
+
+class ReportOperationalQuerySet(models.QuerySet):
+    def update(self, **kwargs):
+        raise ValidationError("Operational records are immutable")
+
+    def delete(self):
+        raise ValidationError("Operational records are retained")
+
+
+class ReportOperationalRecord(models.Model):
+    """Append-only through the ORM; privileged SQL remains a trust boundary."""
+    class Meta:
+        abstract = True
+
+    objects = ReportOperationalQuerySet.as_manager()
+
+    def save(self, *args, **kwargs):
+        if not self._state.adding:
+            raise ValidationError("Operational records are immutable")
+        kwargs["force_insert"] = True
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError("Operational records are retained")
+
+
+class ReportReleaseAuthorization(ReportOperationalRecord):
+    release_id = models.CharField(max_length=64, primary_key=True)
+    bundle_sha256 = models.CharField(max_length=64)
+    manifest_sha256 = models.CharField(max_length=64)
+    execution_contract = models.JSONField()
+    approved_by = models.UUIDField()
+    approved_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        default_permissions = ()
+
+
+class ReportLaunch(models.Model):
+    class State(models.TextChoices):
+        REQUESTED = "REQUESTED"
+        UNCERTAIN = "UNCERTAIN"
+        CONFIRMED = "CONFIRMED"
+        TERMINAL_OBSERVED = "TERMINAL_OBSERVED"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    identity = models.OneToOneField(ReportExecutionIdentity, on_delete=models.PROTECT, related_name="launch")
+    release = models.ForeignKey(ReportReleaseAuthorization, on_delete=models.PROTECT)
+    state = models.CharField(max_length=20, choices=State.choices, default=State.REQUESTED)
+    contract_sha256 = models.CharField(max_length=64)
+    requested_at = models.DateTimeField(auto_now_add=True)
+    dispatch_id = models.UUIDField(null=True, unique=True)
+    dispatch_started_at = models.DateTimeField(null=True)
+    job_id = models.PositiveBigIntegerField(null=True)
+    invocation_id = models.UUIDField(null=True)
+    confirmed_at = models.DateTimeField(null=True)
+    terminal_observed_at = models.DateTimeField(null=True)
+
+    class Meta:
+        default_permissions = ()
+        constraints = [models.CheckConstraint(condition=(
+            models.Q(state="REQUESTED", dispatch_id__isnull=True, dispatch_started_at__isnull=True,
+                     confirmed_at__isnull=True, job_id__isnull=True, invocation_id__isnull=True,
+                     terminal_observed_at__isnull=True)
+            | (models.Q(state__in=["UNCERTAIN", "CONFIRMED", "TERMINAL_OBSERVED"],
+                        dispatch_id__isnull=False, dispatch_started_at__isnull=False)
+               & (models.Q(state="UNCERTAIN", confirmed_at__isnull=True, terminal_observed_at__isnull=True)
+                  | models.Q(state="CONFIRMED", confirmed_at__isnull=False, invocation_id__isnull=False,
+                             terminal_observed_at__isnull=True)
+                  | models.Q(state="TERMINAL_OBSERVED", terminal_observed_at__isnull=False,
+                             invocation_id__isnull=False)))
+        ), name="report_launch_state_complete")]
+
+
+class ReportDeploymentBarrier(models.Model):
+    class State(models.TextChoices):
+        OPEN = "OPEN"
+        DRAINING = "DRAINING"
+        DEPLOYING = "DEPLOYING"
+
+    id = models.PositiveSmallIntegerField(primary_key=True, default=1, editable=False)
+    state = models.CharField(max_length=12, choices=State.choices, default=State.OPEN)
+    generation = models.UUIDField(default=uuid.uuid4)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        default_permissions = ()
+        constraints = [models.CheckConstraint(condition=models.Q(id=1), name="report_deploy_singleton"),
+            models.CheckConstraint(condition=models.Q(state__in=["OPEN", "DRAINING", "DEPLOYING"]),
+                                   name="report_deploy_state_valid")]
+
+
+class ReportOperationalEvent(ReportOperationalRecord):
+    id = models.UUIDField(primary_key=True, editable=False)
+    subject = models.UUIDField()
+    kind = models.CharField(max_length=40)
+    actor = models.UUIDField()
+    fingerprint = models.CharField(max_length=64)
+    details = models.JSONField(default=dict)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        default_permissions = ()
 
 
 class ReportArtifact(models.Model):

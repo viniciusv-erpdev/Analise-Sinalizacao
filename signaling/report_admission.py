@@ -100,6 +100,8 @@ def admit(*, point_id, identity, credentials, user_id, key, expected_revision,
             prior = f._existing(key, user_id, fingerprint)
             if prior:
                 return prior
+            from signaling.report_operations import assert_admission_allowed, execution_contract
+            assert_admission_allowed()
             # Legacy timeout reconciliation is not proof that its process died.
             if slot.attempt_id or Attempt.objects.filter(state__in=(*f.ACTIVE, Attempt.State.INTERRUPTED)).exists():
                 raise f.FinalizationError("publication_busy")
@@ -131,7 +133,8 @@ def admit(*, point_id, identity, credentials, user_id, key, expected_revision,
                     author_identity=snapshot["author"], issued_at=issued_at)
                 attempt = Attempt.objects.create(version=version, requested_by_id=user_id,
                     idempotency_key=key, request_sha256=fingerprint, state=Attempt.State.ADMITTED,
-                    admitted_at=timezone.now(), deadline=None)
+                    admitted_at=timezone.now(), deadline=None,
+                    execution_contract=execution_contract())
                 _persist_photos(attempt, verified, storage)
                 # File writes can take time. Authorization is valid at admission
                 # commit; it is never required again by the future executor.

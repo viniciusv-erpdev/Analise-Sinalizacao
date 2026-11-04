@@ -40,6 +40,8 @@ def prepare(*, attempt_id, expected_execution_id):
             or not re.fullmatch(r"[a-z_][a-z0-9_-]{0,63}", user) or user == "root"):
         raise FinalizationError("supervision_configuration_invalid", 503)
     with admission.coordination():
+        from signaling.report_operations import assert_open
+        assert_open()
         attempt = admission.assert_execution(attempt_id, expected_execution_id, states=(Attempt.State.ADMITTED,))
         prior = Identity.objects.filter(attempt_reference=attempt_id, expected_execution_id=expected_execution_id).first()
         if prior:
@@ -70,10 +72,23 @@ def bind(attempt, context):
     """Called only under the executor's slot/attempt transaction, before rendering."""
     if not settings.REPORT_SYSTEMD_SUPERVISION_ENABLED or not connection.in_atomic_block:
         raise FinalizationError("supervision_binding_unavailable", 503)
+    from signaling.report_operations import assert_open
+    assert_open()
     identity = Identity.objects.select_for_update().filter(pk=context.identity_id).first()
     if identity is None:
         raise FinalizationError("supervision_identity_not_found", 404)
     observed = context.runtime
+    from signaling.models import ReportLaunch
+    launch = ReportLaunch.objects.select_for_update().filter(identity=identity).first()
+    from signaling.report_operations import execution_contract
+    from signaling.report_snapshots import digest
+    if launch and (launch.state not in (ReportLaunch.State.UNCERTAIN, ReportLaunch.State.CONFIRMED)
+            or launch.dispatch_id is None or launch.invocation_id not in (None, observed.invocation_id)
+            or launch.release_id != identity.release_id
+            or launch.contract_sha256 != digest(attempt.execution_contract)
+            or attempt.execution_contract != execution_contract()
+            or launch.release.execution_contract != attempt.execution_contract):
+        raise FinalizationError("launch_binding_invalid")
     if (identity.attempt_id != attempt.pk or identity.attempt_reference != attempt.pk
             or identity.expected_execution_id != attempt.execution_id or identity.bound_at
             or identity.host_id != observed.host.host_id or identity.boot_id != observed.host.boot_id

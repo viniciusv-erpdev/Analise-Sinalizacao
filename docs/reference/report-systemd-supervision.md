@@ -1,5 +1,9 @@
 # Supervisão do executor — preparação 4A
 
+Contratos posteriores de lançamento persistente e barreira operacional:
+[report-operational-contracts.md](report-operational-contracts.md). Não há launcher
+ou recuperação habilitados.
+
 ## Escolha e escopo
 
 | Estratégia | Vantagens | Custos e limites |
