@@ -1,5 +1,8 @@
 # Contratos operacionais persistentes — etapa 4C.1
 
+Descoberta somente de leitura implementada posteriormente:
+[report-dispatcher.md](report-dispatcher.md). Não há despacho ativo.
+
 Implementação: `signaling/report_operations.py`; integração com admissão,
 supervisão, executor, fluxo síncrono e diagnóstico existentes. Não há dispatcher,
 launcher, chamadas de início/parada systemd, endpoint HTTP novo, recuperação ou
