@@ -1,5 +1,8 @@
 # Contratos operacionais persistentes — etapa 4C.1
 
+Autoridade externa e recibo posteriores: [report-launcher.md](report-launcher.md).
+Nenhum serviço está instalado; recuperação e despacho ativo continuam bloqueados.
+
 Descoberta somente de leitura implementada posteriormente:
 [report-dispatcher.md](report-dispatcher.md). Não há despacho ativo.
 

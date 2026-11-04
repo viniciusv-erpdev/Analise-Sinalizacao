@@ -1,0 +1,38 @@
+# REFERENCE ONLY. No service is installed or enabled by this repository.
+[Unit]
+Description=Minimal report launch authority
+Requires=report-launcher.socket
+After=postgresql.service
+
+[Service]
+Type=simple
+User=root
+Group=root
+# Root-owned independent venv/package. Never manage.py, Django, or the app venv.
+ExecStart=<LAUNCHER_VENV>/bin/python -I -B -m report_launcher
+WorkingDirectory=/
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ProtectHome=yes
+ProtectControlGroups=yes
+PrivateTmp=yes
+PrivateDevices=yes
+RestrictNamespaces=yes
+RestrictSUIDSGID=yes
+SystemCallFilter=~@mount
+RestrictAddressFamilies=AF_UNIX
+InaccessiblePaths=<PRIVATE_REPORT_ROOT>
+UnsetEnvironment=PYTHONPATH PYTHONHOME LD_PRELOAD LD_LIBRARY_PATH DBUS_SYSTEM_BUS_ADDRESS
+MemoryMax=512M
+CPUQuota=25%
+TasksMax=16
+LogRateLimitIntervalSec=1s
+LogRateLimitBurst=16
+UMask=0077
+StandardOutput=journal
+StandardError=journal
+Restart=no
+
+# No [Install], dispatcher, timer, recovery, CD hooks or privileged HTTP access.

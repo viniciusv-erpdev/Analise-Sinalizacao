@@ -93,3 +93,6 @@ tmp/*
 
 resultado-testes-etapa6-final.txt
 resultado-testes-etapa6.txt
+
+# Arquivos temporários dos testes do lançador
+.codex-launcher-pg-path

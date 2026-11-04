@@ -1,0 +1,17 @@
+# REFERENCE ONLY. Installation requires a separate approved operational step.
+[Unit]
+Description=Restricted report launcher socket
+
+[Socket]
+ListenSequentialPacket=/run/analise-report-launcher/control.sock
+Accept=no
+SocketUser=root
+SocketGroup=analise_dispatch
+SocketMode=0660
+DirectoryMode=0750
+# The parent directory must be provisioned root:analise_dispatch 0750 separately.
+PassCredentials=yes
+Backlog=8
+Service=report-launcher.service
+
+# No [Install]: this example is not enabled automatically.

@@ -504,6 +504,24 @@ class ReportLaunch(models.Model):
         ), name="report_launch_state_complete")]
 
 
+class ReportLauncherReceipt(ReportOperationalRecord):
+    """Consumption by the external authority, never a reusable start ticket."""
+    id = models.UUIDField(primary_key=True, editable=False)
+    launch = models.OneToOneField(ReportLaunch, on_delete=models.PROTECT, related_name="launcher_receipt")
+    dispatch_id = models.UUIDField(unique=True, editable=False)
+    barrier_generation = models.UUIDField(editable=False)
+    peer_uid = models.PositiveIntegerField(editable=False)
+    host_id = models.CharField(max_length=32, editable=False)
+    boot_id = models.UUIDField(editable=False)
+    policy_sha256 = models.CharField(max_length=64, editable=False)
+    manifest_sha256 = models.CharField(max_length=64, editable=False)
+    bundle_sha256 = models.CharField(max_length=64, editable=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        default_permissions = ()
+
+
 class ReportDeploymentBarrier(models.Model):
     class State(models.TextChoices):
         OPEN = "OPEN"
