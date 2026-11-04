@@ -260,6 +260,18 @@ Serviço, dependências opcionais, limites, comandos e pendências de aceite:
 Modelos, contratos privados, limites, recuperacao e homologacao local:
 [report-finalization.md](report-finalization.md). Funcionalidade desabilitada por padrao.
 
+Admissão persistente interna, exclusividade global, fencing e rollout incremental:
+[report-admission.md](report-admission.md). Sem endpoint de admissão.
+
+Executor manual independente, transições, fencing e recuperação conservadora:
+[report-executor.md](report-executor.md). Sem systemd ou integração HTTP nesta etapa.
+
+Diagnóstico administrativo e prova de encerramento pendente para recuperação:
+[report-recovery.md](report-recovery.md). Sem comando de unlock/reset.
+
+Preparação de identidade persistente e supervisão transitória, sem instalação:
+[report-systemd-supervision.md](report-systemd-supervision.md).
+
 
 ## Leitura de relatorios oficiais - Etapa 7A
 

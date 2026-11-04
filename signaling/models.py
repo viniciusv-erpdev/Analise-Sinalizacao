@@ -321,6 +321,7 @@ class TechnicalReportVersion(models.Model):
 
 class ReportFinalizationAttempt(models.Model):
     class State(models.TextChoices):
+        ADMITTED = "ADMITTED"
         PROCESSING = "PROCESSING"
         STORING = "STORING"
         FINALIZED = "FINALIZED"
@@ -334,13 +335,99 @@ class ReportFinalizationAttempt(models.Model):
     request_sha256 = models.CharField(max_length=64)
     state = models.CharField(max_length=16, choices=State.choices, default=State.PROCESSING)
     execution_id = models.UUIDField(default=uuid.uuid4)
-    deadline = models.DateTimeField(db_index=True)
+    deadline = models.DateTimeField(db_index=True, null=True)
+    admitted_at = models.DateTimeField(null=True, editable=False)
     error_code = models.CharField(max_length=80, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         default_permissions = ()
+        constraints = [models.CheckConstraint(
+            condition=(~models.Q(state="ADMITTED")
+                       | models.Q(admitted_at__isnull=False, deadline__isnull=True)),
+            name="report_admitted_complete",
+        )]
+
+
+class ReportPublicationSlot(models.Model):
+    """Durable ownership, never a lease. Only the future executor may release it."""
+    id = models.PositiveSmallIntegerField(primary_key=True, default=1, editable=False)
+    attempt = models.OneToOneField(
+        ReportFinalizationAttempt, null=True, on_delete=models.PROTECT,
+        related_name="publication_slot",
+    )
+    execution_id = models.UUIDField(null=True, editable=False)
+
+    class Meta:
+        default_permissions = ()
+        constraints = [
+            models.CheckConstraint(condition=models.Q(id=1), name="report_slot_singleton"),
+            models.CheckConstraint(
+                condition=(models.Q(attempt__isnull=True, execution_id__isnull=True)
+                           | models.Q(attempt__isnull=False, execution_id__isnull=False)),
+                name="report_slot_owner_pair",
+            ),
+        ]
+
+
+class ReportIdentityQuerySet(models.QuerySet):
+    def update(self, **kwargs):
+        # SET_NULL must remain available to the existing physical deletion policy.
+        if kwargs != {"attempt": None}:
+            raise ValidationError("Operational identities cannot be rewritten")
+        return super().update(**kwargs)
+
+
+class ReportExecutionIdentity(models.Model):
+    """Never-reused launch intent and bound runtime identity; NOT termination proof."""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    attempt = models.ForeignKey(ReportFinalizationAttempt, null=True, on_delete=models.SET_NULL,
+                               related_name="execution_identities")
+    attempt_reference = models.UUIDField(editable=False)
+    expected_execution_id = models.UUIDField(editable=False)
+    execution_id = models.UUIDField(unique=True, default=uuid.uuid4, editable=False)
+    host_id = models.CharField(max_length=32, editable=False)
+    boot_id = models.UUIDField(editable=False)
+    unit_name = models.CharField(max_length=100, unique=True, editable=False)
+    release_id = models.CharField(max_length=64, editable=False)
+    release_root = models.CharField(max_length=1024, editable=False)
+    service_user = models.CharField(max_length=64, editable=False)
+    prepared_at = models.DateTimeField(auto_now_add=True)
+    bound_at = models.DateTimeField(null=True, editable=False)
+    invocation_id = models.UUIDField(null=True, editable=False)
+    cgroup_path = models.CharField(max_length=512, null=True, editable=False)
+    cgroup_inode = models.PositiveBigIntegerField(null=True, editable=False)
+    main_pid = models.PositiveIntegerField(null=True, editable=False)
+    process_start_ticks = models.PositiveBigIntegerField(null=True, editable=False)
+
+    objects = ReportIdentityQuerySet.as_manager()
+
+    def save(self, *args, **kwargs):
+        if not self._state.adding:
+            frozen = ("attempt_reference", "expected_execution_id", "execution_id", "host_id", "boot_id",
+                      "unit_name", "release_id", "release_root", "service_user", "prepared_at")
+            bound = ("bound_at", "invocation_id", "cgroup_path", "cgroup_inode", "main_pid", "process_start_ticks")
+            previous = type(self).objects.values(*frozen, *bound, "attempt_id").get(pk=self.pk)
+            if (any(previous[name] != getattr(self, name) for name in frozen)
+                    or (self.attempt_id is not None and previous["attempt_id"] != self.attempt_id)
+                    or (previous["bound_at"] and any(previous[name] != getattr(self, name) for name in bound))):
+                raise ValidationError("Operational identities are immutable after binding")
+        return super().save(*args, **kwargs)
+
+    class Meta:
+        default_permissions = ()
+        constraints = [
+            models.UniqueConstraint(fields=["attempt_reference", "expected_execution_id"], name="report_identity_intention_unique"),
+            models.UniqueConstraint(fields=["host_id", "boot_id", "invocation_id"], name="report_identity_invocation_unique"),
+            models.CheckConstraint(condition=(
+                models.Q(bound_at__isnull=True, invocation_id__isnull=True, cgroup_path__isnull=True,
+                         cgroup_inode__isnull=True, main_pid__isnull=True, process_start_ticks__isnull=True)
+                | models.Q(bound_at__isnull=False, invocation_id__isnull=False, cgroup_path__isnull=False,
+                           cgroup_inode__gt=0, main_pid__gt=0, process_start_ticks__gt=0,
+                           cgroup_inode__isnull=False, main_pid__isnull=False, process_start_ticks__isnull=False)
+            ), name="report_identity_binding_complete"),
+        ]
 
 
 class ReportArtifact(models.Model):

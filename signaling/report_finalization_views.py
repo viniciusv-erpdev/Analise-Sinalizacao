@@ -69,6 +69,11 @@ def _payload(request, *, retry=False):
 
 
 def response(attempt, *, created=False):
+    if attempt.admitted_at is not None and attempt.state != "FINALIZED":
+        # Internal admissions have no executor yet. Never advertise runnable HTTP 202.
+        return JsonResponse({"success": False, "code": "admission_executor_unavailable",
+                             "attempt": service.describe(attempt)}, status=409)
+    created = created and not getattr(attempt, "_idempotent_replay", False)
     status = 201 if created and attempt.state == "FINALIZED" else 200 if attempt.state == "FINALIZED" else 202
     if attempt.state in ("FAILED", "INTERRUPTED"):
         status = 409  # Explicit retry only. POST replay never re-executes side effects.

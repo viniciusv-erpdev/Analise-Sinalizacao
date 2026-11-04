@@ -95,7 +95,7 @@ def delete_report(*, user, report_id, operation_id, confirm_number):
                            for v in versions):
                     raise ReportDeletionError("report_not_found", 404)
                 # Even overdue active executions require explicit existing reconciliation first.
-                if any(a.state in (Attempt.State.PROCESSING, Attempt.State.STORING) for a in attempts):
+                if any(a.state in (Attempt.State.ADMITTED, Attempt.State.PROCESSING, Attempt.State.STORING) for a in attempts):
                     raise ReportDeletionError("publication_in_progress")
                 actor = _actor(user)  # revalidate permission after every lock acquisition
                 if report.official_number != confirm_number:

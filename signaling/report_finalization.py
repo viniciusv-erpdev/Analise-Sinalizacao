@@ -110,22 +110,13 @@ def _existing(key, user_id, fingerprint):
             raise FinalizationError("finalization_not_found", 404)
         if attempt.request_sha256 != fingerprint:
             raise FinalizationError("idempotency_key_conflict", attempt=attempt)
+        attempt._idempotent_replay = True
     return attempt
 
 
-def finalize(*, point_id, identity, credentials, user_id, key, expected_revision,
-             parameters, analysis_state, photos):
-    require_enabled()
-    _actor(user_id)
-    if not isinstance(key, UUID) or key.version != 4 or type(expected_revision) is not int or expected_revision < 0:
-        raise ValidationError({"request": "UUID v4 and nonnegative expected_revision required"})
-    query = {name: parameters.getlist(name) for name in sorted(parameters)}
-    fingerprint = digest({"point_id": point_id, "revision": expected_revision,
-                          "filters": query, "photos": [metadata for metadata, _ in photos]})
-    prior = _existing(key, user_id, fingerprint)
-    if prior:
-        return prior  # Read-only replay; never retries conversion implicitly.
-    storage = PrivateReportStorage()  # Validate configuration before reserving a number.
+def prepare_intention(*, point_id, identity, credentials, user_id, expected_revision,
+                      parameters, analysis_state, photos):
+    """Shared capture/validation only; no number, files, rendering or execution."""
     with r.validate_reservation(point_id=point_id, identity=identity, credentials=credentials) as point:
         source = _source(point, user_id)
         if source["draft"]["revision"] != expected_revision:
@@ -146,27 +137,51 @@ def finalize(*, point_id, identity, credentials, user_id, key, expected_revision
                 "photos": [metadata for metadata, _ in photos]}
     if len(canonical(snapshot)) > MAX_SNAPSHOT_BYTES:
         raise ValidationError({"analysis": "Selected report snapshot exceeds 8 MiB"})
+    return source, snapshot
+
+
+def finalize(*, point_id, identity, credentials, user_id, key, expected_revision,
+             parameters, analysis_state, photos):
+    require_enabled()
+    _actor(user_id)
+    if not isinstance(key, UUID) or key.version != 4 or type(expected_revision) is not int or expected_revision < 0:
+        raise ValidationError({"request": "UUID v4 and nonnegative expected_revision required"})
+    query = {name: parameters.getlist(name) for name in sorted(parameters)}
+    fingerprint = digest({"point_id": point_id, "revision": expected_revision,
+                          "filters": query, "photos": [metadata for metadata, _ in photos]})
+    prior = _existing(key, user_id, fingerprint)
+    if prior:
+        return prior  # Read-only replay; never retries conversion implicitly.
+    _require_legacy_mutation()
+    storage = PrivateReportStorage()  # Validate configuration before reserving a number.
+    source, snapshot = prepare_intention(point_id=point_id, identity=identity,
+        credentials=credentials, user_id=user_id, expected_revision=expected_revision,
+        parameters=parameters, analysis_state=analysis_state, photos=photos)
+    author = snapshot["author"]
+    from signaling.report_admission import coordination
     try:
-        with r.validate_reservation(point_id=point_id, identity=identity, credentials=credentials) as point:
-            if digest(_source(point, user_id)) != digest(source):
-                raise FinalizationError("report_source_changed")
-            prior = _existing(key, user_id, fingerprint)
-            if prior:
-                return prior
-            issued_at = official_issued_at()
-            sequence = _counter(issued_at.year)
-            _fence(point_id, identity, credentials, user_id)
-            report = TechnicalReport.objects.create(waypoint=point, waypoint_history=source["point"],
-                year=issued_at.year, sequence=sequence, number_reserved_at=issued_at)
-            snapshot.update(issued_at=issued_at.isoformat(), official_number=report.official_number)
-            # Normalize dates, tuples, Decimal etc before freezing JSON/hash.
-            snapshot = json.loads(canonical(snapshot))
-            version = TechnicalReportVersion.objects.create(report=report, snapshot=snapshot,
-                schema_version=SCHEMA_VERSION, snapshot_sha256=digest(snapshot), source_sha256=digest(source),
-                author_id=user_id, author_identity=author, issued_at=issued_at)
-            attempt = Attempt.objects.create(version=version, requested_by_id=user_id,
-                idempotency_key=key, request_sha256=fingerprint,
-                deadline=timezone.now() + timedelta(seconds=settings.REPORT_EXECUTION_SECONDS))
+        with coordination(wait=True):
+            _require_legacy_mutation()
+            with r.validate_reservation(point_id=point_id, identity=identity, credentials=credentials) as point:
+                if digest(_source(point, user_id)) != digest(source):
+                    raise FinalizationError("report_source_changed")
+                prior = _existing(key, user_id, fingerprint)
+                if prior:
+                    return prior
+                issued_at = official_issued_at()
+                sequence = _counter(issued_at.year)
+                _fence(point_id, identity, credentials, user_id)
+                report = TechnicalReport.objects.create(waypoint=point, waypoint_history=source["point"],
+                    year=issued_at.year, sequence=sequence, number_reserved_at=issued_at)
+                snapshot.update(issued_at=issued_at.isoformat(), official_number=report.official_number)
+                # Normalize dates, tuples, Decimal etc before freezing JSON/hash.
+                snapshot = json.loads(canonical(snapshot))
+                version = TechnicalReportVersion.objects.create(report=report, snapshot=snapshot,
+                    schema_version=SCHEMA_VERSION, snapshot_sha256=digest(snapshot), source_sha256=digest(source),
+                    author_id=user_id, author_identity=author, issued_at=issued_at)
+                attempt = Attempt.objects.create(version=version, requested_by_id=user_id,
+                    idempotency_key=key, request_sha256=fingerprint,
+                    deadline=timezone.now() + timedelta(seconds=settings.REPORT_EXECUTION_SECONDS))
     except IntegrityError:
         # A globally reused key on different points can race the initial lookup.
         prior = _existing(key, user_id, fingerprint)
@@ -176,18 +191,31 @@ def finalize(*, point_id, identity, credentials, user_id, key, expected_revision
     return _execute(attempt, identity, credentials, user_id, photos, storage)
 
 
+def _require_legacy_mutation():
+    from signaling.models import ReportPublicationSlot
+    if ReportPublicationSlot.objects.filter(attempt__isnull=False).exists():
+        raise FinalizationError("publication_busy")
+    if settings.REPORT_ADMISSION_ENABLED:
+        raise FinalizationError("synchronous_finalization_disabled", 503)
+
+
 def _assert_run(attempt_id, execution_id):
     attempt = Attempt.objects.select_for_update().filter(pk=attempt_id).first()
     if attempt is None:
         raise FinalizationError("finalization_not_found", 404)
-    if attempt.execution_id != execution_id or attempt.state not in ACTIVE or attempt.deadline <= timezone.now():
+    # Admitted attempts belong exclusively to the future executor contract.
+    if (attempt.admitted_at is not None or attempt.execution_id != execution_id
+            or attempt.state not in ACTIVE or attempt.deadline is None
+            or attempt.deadline <= timezone.now()):
         raise FinalizationError("execution_superseded", attempt=attempt)
     return attempt
 
 
-def _store(attempt, storage, kind, data, *, ordinal=0, metadata=None):
+def _store(attempt, storage, kind, data, *, ordinal=0, metadata=None, assert_run=None):
+    # Each caller supplies its execution contract; the legacy default is unchanged.
+    check = assert_run or _assert_run
     with transaction.atomic():
-        _assert_run(attempt.pk, attempt.execution_id)
+        check(attempt.pk, attempt.execution_id)
     metadata = metadata or {}
     extension = {"PDF": "pdf", "DOCX": "docx", "PHOTO": "jpg" if metadata.get("format") == "JPEG" else "png"}[kind]
     key = f"{attempt.version_id}/{attempt.execution_id}/{uuid4()}.{extension}"
@@ -198,7 +226,7 @@ def _store(attempt, storage, kind, data, *, ordinal=0, metadata=None):
     size, sha256 = len(data), hashlib.sha256(data).hexdigest()
     storage.read(SimpleNamespace(storage_key=key, size=size, sha256=sha256))
     with transaction.atomic():
-        _assert_run(attempt.pk, attempt.execution_id)
+        check(attempt.pk, attempt.execution_id)
         artifact = ReportArtifact.objects.create(version_id=attempt.version_id, kind=kind, ordinal=ordinal,
             storage_key=key, download_name=f"{attempt.version.report.official_number}-v{attempt.version.version}" +
                 (f"-foto-{ordinal + 1}" if kind == "PHOTO" else "") + f".{extension}",
@@ -218,6 +246,8 @@ def _error_status(error):
 
 
 def _execute(attempt, identity, credentials, user_id, photos, storage):
+    if attempt.admitted_at is not None:
+        raise FinalizationError("admission_executor_unavailable", 503)
     version = attempt.version
     try:
         if digest(version.snapshot) != version.snapshot_sha256:
@@ -279,29 +309,35 @@ def retry(*, attempt_id, user_id, identity, credentials, photos=()):
     attempt = get_attempt(attempt_id, user_id)
     if attempt.state == Attempt.State.FINALIZED:
         return attempt
+    _require_legacy_mutation()
+    if attempt.admitted_at is not None:
+        raise FinalizationError("admission_executor_unavailable", 503)
     point_id = attempt.version.report.waypoint_id
     if point_id is None:
         raise FinalizationError("waypoint_not_found", 404, attempt)
     storage = PrivateReportStorage()
     if photos and [metadata for metadata, _ in photos] != attempt.version.snapshot["photos"]:
         raise FinalizationError("original_photos_mismatch", attempt=attempt)
-    with r.validate_reservation(point_id=point_id, identity=identity, credentials=credentials) as point:
-        if digest(_source(point, user_id)) != attempt.version.source_sha256:
-            raise FinalizationError("report_source_changed", attempt=attempt)
-        current = Attempt.objects.select_for_update().filter(pk=attempt_id).first()
-        if current is None:
-            raise FinalizationError("finalization_not_found", 404)
-        _fence(point_id, identity, credentials, user_id)
-        if current.state == Attempt.State.FINALIZED:
-            return get_attempt(attempt_id, user_id)
-        if current.state in ACTIVE and current.deadline > timezone.now():
-            return get_attempt(attempt_id, user_id)
-        # Remove only unpublished derivative metadata. Files become reconciliation candidates.
-        # Keep original photos and the immutable snapshot/number across retries.
-        current.version.artifacts.filter(kind__in=("PDF", "DOCX")).delete()
-        current.execution_id = uuid4()
-        current.deadline = timezone.now() + timedelta(seconds=settings.REPORT_EXECUTION_SECONDS)
-        current.state, current.error_code = Attempt.State.PROCESSING, ""
-        current.save(update_fields=["execution_id", "deadline", "state", "error_code", "updated_at"])
-        attempt = current
+    from signaling.report_admission import coordination
+    with coordination(wait=True):
+        _require_legacy_mutation()
+        with r.validate_reservation(point_id=point_id, identity=identity, credentials=credentials) as point:
+            if digest(_source(point, user_id)) != attempt.version.source_sha256:
+                raise FinalizationError("report_source_changed", attempt=attempt)
+            current = Attempt.objects.select_for_update().filter(pk=attempt_id).first()
+            if current is None:
+                raise FinalizationError("finalization_not_found", 404)
+            _fence(point_id, identity, credentials, user_id)
+            if current.state == Attempt.State.FINALIZED:
+                return get_attempt(attempt_id, user_id)
+            if current.state in ACTIVE and current.deadline and current.deadline > timezone.now():
+                return get_attempt(attempt_id, user_id)
+            # Remove only unpublished derivative metadata. Files become reconciliation candidates.
+            # Keep original photos and the immutable snapshot/number across retries.
+            current.version.artifacts.filter(kind__in=("PDF", "DOCX")).delete()
+            current.execution_id = uuid4()
+            current.deadline = timezone.now() + timedelta(seconds=settings.REPORT_EXECUTION_SECONDS)
+            current.state, current.error_code = Attempt.State.PROCESSING, ""
+            current.save(update_fields=["execution_id", "deadline", "state", "error_code", "updated_at"])
+            attempt = current
     return _execute(attempt, identity, credentials, user_id, photos, storage)

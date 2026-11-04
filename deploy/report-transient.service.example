@@ -1,0 +1,44 @@
+# PROPERTY REFERENCE ONLY. Do not install/enable this file as a reusable unit.
+# The future trusted operator creates a transient unit named exactly as the DB plan:
+# rtsv-report-<identity UUID without hyphens>.service
+# Every placeholder must be supplied from trusted deployment configuration/DB plan.
+[Unit]
+Description=One prepared technical report execution
+
+[Service]
+Type=exec
+# Same unprivileged Unix user/group as Gunicorn, preserving private storage modes.
+# This account must not have permission to manage systemd units.
+User=<APP_USER>
+Group=<APP_GROUP>
+WorkingDirectory=<IMMUTABLE_RELEASE_ROOT>
+EnvironmentFile=<ROOT_OWNED_EXECUTOR_ENV_FILE>
+ExecStart=<IMMUTABLE_VENV>/bin/python -B <IMMUTABLE_RELEASE_ROOT>/manage.py execute_supervised_report --identity-id <IDENTITY_UUID>
+Restart=no
+KillMode=control-group
+KillSignal=SIGTERM
+SendSIGKILL=yes
+TimeoutStopSec=20s
+RuntimeMaxSec=180s
+MemoryMax=1536M
+TasksMax=64
+OOMPolicy=kill
+Delegate=no
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectControlGroups=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+SystemCallFilter=~@mount
+UMask=0077
+ReadWritePaths=<PRIVATE_REPORT_ROOT>
+StandardOutput=journal
+StandardError=journal
+
+# Resource values are starting hypotheses for homologation, not measured limits.
+# No [Install], timer, restart policy, privileged HTTP launcher or recovery action.
