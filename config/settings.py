@@ -170,6 +170,11 @@ REGISTRATION_ENABLED = registration_value in {"true", "1", "yes", "on"}
 
 # Synchronous official finalization is for homologation only, opt-in.
 REPORT_FINALIZATION_ENABLED = os.environ.get("REPORT_FINALIZATION_ENABLED", "false").lower() == "true"
+# Independent rollout gates. Never imply that merely admitting an internal intent
+# enables the HTTP integration or the local dispatcher.
+REPORT_ASYNC_PUBLICATION_ENABLED = os.environ.get("REPORT_ASYNC_PUBLICATION_ENABLED", "false").lower() == "true"
+REPORT_DISPATCH_ENABLED = os.environ.get("REPORT_DISPATCH_ENABLED", "false").lower() == "true"
+REPORT_DISPATCH_DSN = os.environ.get("REPORT_DISPATCH_DSN", "")
 # Internal admission only; no HTTP admission route is installed.
 # Enabling this gate blocks new synchronous publications/retries.
 REPORT_ADMISSION_ENABLED = os.environ.get("REPORT_ADMISSION_ENABLED", "false").lower() == "true"

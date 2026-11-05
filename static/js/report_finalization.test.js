@@ -58,6 +58,20 @@ test("202 false success is processing, status is explicit and needs no reservati
     f.respond=()=>reply(description("FINALIZED")); assert.equal((await f.client.check()).kind,"published");
     assert.equal(f.calls.length,1); assert.equal(f.gets[0].init.credentials,"same-origin");
 });
+
+test("202 ADMITTED preserves intention and explicit status without another publication", async () => {
+    const f=fixture(); f.respond=()=>reply({...description("ADMITTED"),accepted:true},202);
+    const accepted=await f.client.submit();
+    assert.equal(accepted.kind,"processing");
+    assert.equal(accepted.attempt.state,"ADMITTED");
+    assert.equal(accepted.recovery.attemptId,"attempt-1");
+    assert.equal(accepted.recovery.idempotencyKey,key);
+    assert.equal((await f.client.check()).attempt.state,"ADMITTED");
+    assert.equal(f.calls.length,1);
+    assert.equal(f.gets.length,1);
+    assert.equal((await f.client.retry()).code,"explicit_retry_not_available");
+    assert.equal(f.calls.length,1);
+});
 test("failed attempt retained; only explicit retry posts empty payload to retry endpoint", async () => {
     const f=fixture(); f.respond=()=>reply({code:"conversion_failed",attempt:description("FAILED")},503);
     await f.client.submit(); assert.equal(f.client.recovery().attemptId,"attempt-1");

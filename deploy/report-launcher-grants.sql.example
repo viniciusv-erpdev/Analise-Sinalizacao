@@ -24,5 +24,13 @@ GRANT EXECUTE ON FUNCTION public.report_launcher_envelope(uuid),public.report_la
  public.report_launcher_consume(uuid,uuid,uuid,integer,text,uuid,text,jsonb),
  public.report_launcher_job(uuid,uuid,bigint) TO report_launcher_runtime;
 GRANT SELECT ON public.report_dispatch_projection TO report_dispatch_runtime;
--- No raw table grants, consumption rights, Django settings credentials or storage
--- access to dispatcher/Gunicorn. Active prepare/request APIs are a later stage.
+-- Stage 4C.4. No grant is installed by migration; review/apply separately.
+GRANT SELECT ON public.signaling_reportdispatchdelivery TO report_launcher_owner;
+GRANT INSERT ON public.signaling_reportexecutionidentity,public.signaling_reportlaunch,
+ public.signaling_reportdispatchdelivery TO report_launcher_owner;
+ALTER FUNCTION public.report_dispatch_candidate() OWNER TO report_launcher_owner;
+ALTER FUNCTION public.report_dispatch_prepare(uuid,uuid,uuid,text,text,text,uuid) OWNER TO report_launcher_owner;
+GRANT EXECUTE ON FUNCTION public.report_dispatch_candidate(),
+ public.report_dispatch_prepare(uuid,uuid,uuid,text,text,text,uuid) TO report_dispatch_runtime;
+-- No raw table grants, consumption rights, HTTP credentials or storage access
+-- to dispatcher. Gunicorn must have NO membership in either runtime role.

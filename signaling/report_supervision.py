@@ -89,6 +89,19 @@ def bind(attempt, context):
             or attempt.execution_contract != execution_contract()
             or launch.release.execution_contract != attempt.execution_contract):
         raise FinalizationError("launch_binding_invalid")
+    # Active deliveries require the independently consumed authority receipt.
+    # Preserve pre-integration internal/manual contracts for historical tests.
+    from signaling.models import ReportDispatchDelivery, ReportLauncherReceipt
+    delivery = ReportDispatchDelivery.objects.filter(launch=launch).first() if launch else None
+    if delivery:
+        receipt = ReportLauncherReceipt.objects.filter(launch=launch).first()
+        if (not receipt or receipt.pk != delivery.pk
+                or receipt.dispatch_id != launch.dispatch_id
+                or receipt.barrier_generation != delivery.barrier_generation
+                or receipt.host_id != observed.host.host_id or receipt.boot_id != observed.host.boot_id
+                or receipt.manifest_sha256 != launch.release.manifest_sha256
+                or receipt.bundle_sha256 != launch.release.bundle_sha256):
+            raise FinalizationError("launch_receipt_invalid")
     if (identity.attempt_id != attempt.pk or identity.attempt_reference != attempt.pk
             or identity.expected_execution_id != attempt.execution_id or identity.bound_at
             or identity.host_id != observed.host.host_id or identity.boot_id != observed.host.boot_id

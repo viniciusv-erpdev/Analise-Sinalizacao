@@ -197,7 +197,7 @@ def _require_legacy_mutation():
     from signaling.models import ReportPublicationSlot
     if ReportPublicationSlot.objects.filter(attempt__isnull=False).exists():
         raise FinalizationError("publication_busy")
-    if settings.REPORT_ADMISSION_ENABLED:
+    if settings.REPORT_ADMISSION_ENABLED or settings.REPORT_ASYNC_PUBLICATION_ENABLED:
         raise FinalizationError("synchronous_finalization_disabled", 503)
 
 

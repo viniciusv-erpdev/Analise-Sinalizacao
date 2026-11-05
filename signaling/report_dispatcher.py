@@ -12,7 +12,8 @@ from django.utils import timezone
 
 from signaling.models import (ReportPublicationSlot as Slot, ReportFinalizationAttempt as Attempt,
     ReportExecutionIdentity as Identity, ReportLaunch as Launch, ReportReleaseAuthorization as Release,
-    TechnicalReportVersion as Version, TechnicalReport as Report, ReportArtifact as Artifact)
+    TechnicalReportVersion as Version, TechnicalReport as Report, ReportArtifact as Artifact,
+    ReportDispatchDelivery as Delivery)
 from signaling.report_operations import barrier_status, execution_contract
 from signaling.report_snapshots import digest, canonical, MAX_SNAPSHOT_BYTES
 from signaling.forms import MAX_REPORT_PHOTOS
@@ -40,6 +41,7 @@ def _read():
             "number_assigned_at").first() if version else None
         identities = list(Identity.objects.filter(attempt_reference=owner).order_by("pk").values()[:2]) if owner else []
         launches = list(Launch.objects.filter(identity__attempt_reference=owner).order_by("pk").values()[:2]) if owner else []
+        delivered = Delivery.objects.filter(launch__identity__attempt_reference=owner).exists() if owner else False
         release_id = identities[0]["release_id"] if identities else settings.REPORT_EXECUTOR_RELEASE_ID
         release = Release.objects.filter(pk=release_id).values().first() if release_id else None
         photos = list(Artifact.objects.filter(version_id=version["id"], kind="PHOTO").order_by("ordinal")
@@ -49,7 +51,7 @@ def _read():
         if owner:
             unfinished = unfinished.exclude(pk=owner)
         return {"barrier": barrier, "slot": slot, "attempt": attempt, "version": version, "report": report,
-            "identities": identities, "launches": launches, "release": release, "photos": photos,
+            "identities": identities, "launches": launches, "delivered": delivered, "release": release, "photos": photos,
             "derivatives": derivatives, "other_unfinished": unfinished.count(),
             "identity_count": Identity.objects.count(), "launch_count": Launch.objects.count()}
 
@@ -156,6 +158,8 @@ def _classify(data):
         return "UNCERTAIN", ["launch_uncertain" if launch["state"] == Launch.State.UNCERTAIN else "termination_unverified"]
     if attempt["state"] in (Attempt.State.PROCESSING, Attempt.State.STORING):
         return "EXECUTION_IN_PROGRESS", ["execution_already_started"]
+    if data.get("delivered"):
+        return "UNCERTAIN", ["dispatch_delivery_not_reissued"]
     if attempt["state"] != Attempt.State.ADMITTED:
         return "INCONSISTENT", ["attempt_state_invalid"]
     release, contract = data["release"], attempt["execution_contract"]

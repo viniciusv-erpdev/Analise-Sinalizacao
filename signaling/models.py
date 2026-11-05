@@ -504,6 +504,17 @@ class ReportLaunch(models.Model):
         ), name="report_launch_state_complete")]
 
 
+class ReportDispatchDelivery(ReportOperationalRecord):
+    """One durable handoff. Absence of a receipt NEVER permits another send."""
+    id = models.UUIDField(primary_key=True, editable=False)
+    launch = models.OneToOneField(ReportLaunch, on_delete=models.PROTECT, related_name="delivery")
+    barrier_generation = models.UUIDField(editable=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        default_permissions = ()
+
+
 class ReportLauncherReceipt(ReportOperationalRecord):
     """Consumption by the external authority, never a reusable start ticket."""
     id = models.UUIDField(primary_key=True, editable=False)

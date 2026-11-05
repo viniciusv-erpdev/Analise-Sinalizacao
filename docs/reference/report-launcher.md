@@ -4,6 +4,9 @@ Não instalado, não iniciado, não habilitado. Nenhuma chamada real a systemd f
 feita. As flags Django continuam com os defaults anteriores. O dispatcher 4C.2
 continua exclusivamente diagnóstico. Não existe recuperação administrativa.
 
+A integração ativa posterior está descrita em [report-async-integration.md](report-async-integration.md).
+Ela usa comando/perfil próprios; o diagnóstico 4C.2 permanece somente leitura.
+
 ## Componentes e fronteira privilegiada
 
 `report_launcher/` é um pacote independente, instalável pelo seu próprio

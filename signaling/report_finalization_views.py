@@ -4,6 +4,9 @@ import json
 from uuid import UUID
 
 from django.http import JsonResponse
+from django.conf import settings
+from django.urls import reverse
+from django.db import DatabaseError
 from django.core.exceptions import ValidationError, ImproperlyConfigured
 from django.views.decorators.http import require_GET, require_POST
 from django.views.decorators.debug import sensitive_variables
@@ -30,6 +33,10 @@ def api(view):
                 error.attempt.refresh_from_db()
                 result["attempt"] = service.describe(error.attempt)
             return private(JsonResponse(result, status=error.status))
+        except DatabaseError:
+            # A lost commit reply is not proof that admission failed. Reuse the
+            # same key or query its known attempt; never mint another intention.
+            return private(JsonResponse({"success": False, "code": "publication_state_unknown"}, status=503))
         except ImproperlyConfigured:
             import logging
             logging.getLogger(__name__).exception(
@@ -70,7 +77,13 @@ def _payload(request, *, retry=False):
 
 def response(attempt, *, created=False):
     if attempt.admitted_at is not None and attempt.state != "FINALIZED":
-        # Internal admissions have no executor yet. Never advertise runnable HTTP 202.
+        if settings.REPORT_ASYNC_PUBLICATION_ENABLED:
+            url = reverse("signaling:report-finalization-status", args=[attempt.pk])
+            result = service.describe(attempt)
+            accepted = attempt.state in ("ADMITTED", "PROCESSING", "STORING")
+            result.update(accepted=accepted, status_url=url)
+            return JsonResponse(result, status=202 if accepted else 409,
+                                headers={"Location": url})
         return JsonResponse({"success": False, "code": "admission_executor_unavailable",
                              "attempt": service.describe(attempt)}, status=409)
     created = created and not getattr(attempt, "_idempotent_replay", False)
@@ -86,9 +99,15 @@ def response(attempt, *, created=False):
 @sensitive_variables()
 def finalize_report(request, point_id):
     service.require_enabled()
+    if settings.REPORT_ASYNC_PUBLICATION_ENABLED:
+        _require_async()
     data, photos = _payload(request)
     proof = credentials(request)
-    attempt = service.finalize(point_id=point_id, user_id=request.user.pk,
+    operation = service.finalize
+    if settings.REPORT_ASYNC_PUBLICATION_ENABLED:
+        from signaling.report_admission import admit
+        operation = admit
+    attempt = operation(point_id=point_id, user_id=request.user.pk,
         identity=identity(request), credentials=proof, key=UUID(data["idempotency_key"]),
         expected_revision=data["expected_revision"], parameters=request.GET,
         analysis_state=request.session.get(ANALYSIS_SESSION_KEY), photos=photos)
@@ -100,7 +119,12 @@ def finalize_report(request, point_id):
 @signaling_access(REPORT, service.FINALIZE)
 def finalization_status(request, attempt_id):
     service.require_enabled()
-    return JsonResponse(service.describe(service.get_attempt(attempt_id, request.user.pk)))
+    attempt = service.get_attempt(attempt_id, request.user.pk)
+    result = service.describe(attempt)
+    if attempt.admitted_at is not None:
+        from signaling.report_async import progress
+        result.update(progress(attempt))
+    return JsonResponse(result)
 
 
 @api
@@ -110,5 +134,17 @@ def finalization_status(request, attempt_id):
 def retry_finalization(request, attempt_id):
     service.require_enabled()
     _, photos = _payload(request, retry=True)
+    if settings.REPORT_ASYNC_PUBLICATION_ENABLED:
+        _require_async()
+        if photos:
+            raise ValueError  # A persisted intention cannot accept replacement inputs.
+        from signaling.report_admission import retry_admission
+        return response(retry_admission(attempt_id=attempt_id, user_id=request.user.pk))
     return response(service.retry(attempt_id=attempt_id, user_id=request.user.pk,
         identity=identity(request), credentials=credentials(request), photos=photos))
+
+
+def _require_async():
+    if not all((settings.REPORT_ADMISSION_ENABLED, settings.REPORT_EXECUTOR_ENABLED,
+                settings.REPORT_SYSTEMD_SUPERVISION_ENABLED)):
+        raise service.FinalizationError("async_publication_configuration_invalid", 503)
