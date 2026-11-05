@@ -75,7 +75,6 @@ jobs:
       POSTGRES_USER: report_ci
       POSTGRES_PASSWORD: isolated-unused
       POSTGRES_HOST: 127.0.0.1
-      POSTGRES_PORT: ${{ job.services.postgres.ports[5432] }}
       DJANGO_TEST_DB_NAME: test_report_ci
     steps:
       - uses: actions/checkout@v4
@@ -90,12 +89,16 @@ jobs:
           python -m pip install -r requirements.txt
           python -m pip check
       - name: Verify required backend and validator
+        env:
+          POSTGRES_PORT: ${{ job.services.postgres.ports['5432'] }}
         run: |
           python -c 'import os, pypdf; assert os.environ["DJANGO_DB_BACKEND"] == "postgresql"; assert pypdf.__version__ == "6.21.3"'
           python manage.py check
           python manage.py makemigrations --check --dry-run
           bash -n deploy/provision-report-hml.sh
       - name: Mandatory transaction, permission, fault and legacy suites - no skips
+        env:
+          POSTGRES_PORT: ${{ job.services.postgres.ports['5432'] }}
         run: >-
           python manage.py test
           report-contracts
