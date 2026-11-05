@@ -1,5 +1,7 @@
 # Integração controlada HTTP / despachante / lançador — 4C.4
 
+Correções de dependências, CI, grants completos e artefato: [report-readiness.md](report-readiness.md).
+
 Implementação local, desabilitada por padrão. Nenhum serviço é instalado. Os
 procedimentos abaixo são para homologação futura autorizada, não para produção.
 

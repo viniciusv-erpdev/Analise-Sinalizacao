@@ -49,4 +49,72 @@ jobs:
           node-version: '24'
 
       - name: Testar interface de mapa e sinalização
-        run: node --test static/js/individual_filters.test.js static/js/map.test.js static/js/intersection_problems.test.js static/js/report_characterization.test.js
+        run: node --test static/js/individual_filters.test.js static/js/map.test.js static/js/intersection_problems.test.js static/js/report_characterization.test.js static/js/report_finalization.test.js static/js/report_publication_flow.test.js
+
+  report-postgresql:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:18.6
+        env:
+          POSTGRES_DB: report_ci
+          POSTGRES_USER: report_ci
+          # Disposable container only; no production secrets. Role tests open
+          # independent LOGIN connections using synthetic per-test identities.
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432/tcp
+        options: >-
+          --health-cmd "pg_isready -U report_ci -d report_ci"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DJANGO_DEBUG: "True"
+      DJANGO_DB_BACKEND: postgresql
+      POSTGRES_DB: report_ci
+      POSTGRES_USER: report_ci
+      POSTGRES_PASSWORD: isolated-unused
+      POSTGRES_HOST: 127.0.0.1
+      POSTGRES_PORT: ${{ job.services.postgres.ports[5432] }}
+      DJANGO_TEST_DB_NAME: test_report_ci
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.14'
+          cache: pip
+      - name: Install application dependencies
+        run: |
+          python -m pip install -r requirements.txt
+          python -m pip check
+      - name: Verify required backend and validator
+        run: |
+          python -c 'import os, pypdf; assert os.environ["DJANGO_DB_BACKEND"] == "postgresql"; assert pypdf.__version__ == "6.21.3"'
+          python manage.py check
+          python manage.py makemigrations --check --dry-run
+          bash -n deploy/provision-report-hml.sh
+      - name: Mandatory transaction, permission, fault and legacy suites - no skips
+        run: >-
+          python manage.py test
+          report-contracts
+          --testrunner=signaling.report_ci_runner.NoSkipRunner --noinput
+      - name: Package immutable release in temporary Linux prefix - no deployment
+        shell: bash
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: |
+          set -euo pipefail
+          wheelhouse="$RUNNER_TEMP/report-wheelhouse"
+          release_root="$RUNNER_TEMP/report-release"
+          mkdir "$wheelhouse" "$release_root"
+          bootstrap_pip=$(python -c 'import pip; print(pip.__version__)')
+          python -m pip download --only-binary=:all: -r requirements.txt "pip==$bootstrap_pip" --dest "$wheelhouse"
+          python -B -m scripts.report_release wheel-lock "$wheelhouse" > "$RUNNER_TEMP/report-runtime.lock"
+          git archive HEAD | tar -x -C "$release_root"
+          cp "$RUNNER_TEMP/report-runtime.lock" "$release_root/requirements.resolved.txt"
+          python -B -m venv --copies "$release_root/.venv"
+          "$release_root/.venv/bin/python" -B -m pip install --no-compile --no-index --only-binary=:all: --find-links "$wheelhouse" --require-hashes -r "$RUNNER_TEMP/report-runtime.lock"
+          python -B -m scripts.report_release normalize-lib64 "$release_root"
+          python -B -m scripts.report_release manifest "$release_root" --release-id "$GITHUB_SHA"

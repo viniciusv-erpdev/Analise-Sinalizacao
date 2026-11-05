@@ -1,4 +1,7 @@
 -- REFERENCE ONLY. Review role names, DB ownership, pg_hba and schema first.
+-- Stage 5B complete HML policy: scripts/report_permission_policy.py.
+-- Generate the reviewed transactional plan with python -m scripts.report_hml_plan.
+-- This historical authority-only example is NOT the HTTP/executor provisioning plan.
 -- Apply only in a separate authorized operation. Not executed by migrations.
 -- Never reuse the Gunicorn DB role as either authority role.
 CREATE ROLE report_launcher_owner NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE;

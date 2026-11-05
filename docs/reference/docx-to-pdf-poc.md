@@ -32,7 +32,7 @@ em HTML. Perfil isolado evita encaminhamento para uma instância gráfica existe
 outro template e não valida a fidelidade do DOCX atual. APIs externas acrescentariam
 tráfego de documentos, custo e dependência desnecessários nesta PoC.
 
-A dependência opcional `pypdf==6.21.3` serve para validação estrutural (xref, páginas,
+A dependência `pypdf==6.21.3`, obrigatória na publicação oficial, serve para validação estrutural (xref, páginas,
 MediaBox, ausência de criptografia), não para renderização. Fica somente em
 `requirements-pdf-poc.txt`, sem alterar as dependências do fluxo DOCX existente.
 
