@@ -1,0 +1,47 @@
+name: Report launcher - isolated Linux checks
+
+# Manual only. No deploy, production secrets, SSH, CD timer or real systemd calls.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  unix-credentials:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout trusted reviewed source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+
+      - name: Build independent launcher test environment without Django
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m venv --copies "$RUNNER_TEMP/launcher-tests"
+          "$RUNNER_TEMP/launcher-tests/bin/python" -m pip install --no-deps ./report_launcher
+          "$RUNNER_TEMP/launcher-tests/bin/python" -I -B -c '
+          import unittest
+          suite = unittest.defaultTestLoader.loadTestsFromName("report_launcher.test_launcher")
+          result = unittest.TextTestRunner(verbosity=2).run(suite)
+          if result.testsRun != 15 or result.skipped or not result.wasSuccessful():
+              raise SystemExit("Portable checks require 15 successful tests and zero skips")
+          '
+
+      - name: Test real UIDs and kernel credentials in this disposable runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          getent passwd daemon nobody
+          /usr/bin/timeout --signal=TERM --kill-after=5s 90s sudo -n /usr/bin/env -i PATH=/usr/bin:/bin "$RUNNER_TEMP/launcher-tests/bin/python" -I -B -c '
+          import os, sys, unittest
+          if sys.platform != "linux" or os.geteuid() != 0 or "django" in sys.modules:
+              raise SystemExit("Requires isolated Linux root without Django")
+          suite = unittest.defaultTestLoader.loadTestsFromName("report_launcher.test_linux_credentials")
+          result = unittest.TextTestRunner(verbosity=2).run(suite)
+          if result.testsRun != 4 or result.skipped or not result.wasSuccessful():
+              raise SystemExit("Linux checks require 4 successful tests and zero skips")
+          '
