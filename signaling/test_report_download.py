@@ -29,7 +29,7 @@ DOCX_CONTENT_TYPE = (
 class SignalingReportDownloadTests(ReservationFunctionalTestMixin, TestCase):
     def setUp(self):
         super().setUp()
-        authorize(self.client, ("view_signalingpoint", "generate_signaling_report"))
+        self.user = authorize(self.client, ("view_signalingpoint", "generate_signaling_report"))
         self.point = SignalingPoint.objects.create(
             latitude=0,
             longitude=0,
@@ -526,3 +526,139 @@ class SignalingReportDownloadTests(ReservationFunctionalTestMixin, TestCase):
             original_point,
         )
         self.assertEqual(intervention.notes, "Original")
+
+
+    def test_technical_analysis_and_title_are_at_the_end_of_the_form(self):
+        self.set_individual_analysis()
+        response = self.client.get(self.url)
+        self.assertContains(response, "Relatório Técnico de Segurança Viária")
+        self.assertContains(response, 'name="technical_analysis"')
+        self.assertContains(response, 'maxlength="10000"')
+        html = response.content.decode()
+        self.assertGreater(html.index('name="technical_analysis"'), html.index('name="photos"'))
+        self.assertLess(html.index('name="technical_analysis"'), html.index("Gerar relatório Word"))
+
+    def test_technical_analysis_and_backend_author_reach_actual_docx(self):
+        self.set_individual_analysis()
+        self.user.first_name = "Joana"
+        self.user.last_name = "Santos"
+        self.user.save()
+        data = self.valid_form_data()
+        data.update({"technical_analysis": "Considerações finais.\nMelhorar a visibilidade.",
+                     "author": "AUTOR FORJADO", "issued_at": "DATA FORJADA", "user_id": "999999"})
+        response = self.client.post(self.url, data)
+        self.assertEqual(response.status_code, 200)
+        document = Document(BytesIO(self.response_bytes(response)))
+        paragraphs = [paragraph.text for paragraph in document.paragraphs]
+        text = "\n".join(paragraphs)
+        self.assertIn(data["technical_analysis"], text)
+        self.assertIn(f"Autor da geração: Joana Santos ({self.user.username})", text)
+        self.assertNotIn("AUTOR FORJADO", text)
+        self.assertNotIn("DATA FORJADA", text)
+        self.assertTrue(paragraphs[-1].startswith("Data de emissão:"))
+
+    def test_technical_analysis_validation_preserves_values_without_generating_docx(self):
+        self.set_individual_analysis()
+        for value in ("x"*10001, "Inválido\x00XML"):
+            with self.subTest(size=len(value)), patch("signaling.views.generate_signaling_report") as generator:
+                response = self.client.post(self.url, {**self.valid_form_data(), "technical_analysis": value})
+                self.assertEqual(response.status_code, 200)
+                self.assertIn("technical_analysis", response.context["form"].errors)
+                generator.assert_not_called()
+
+    def test_publication_preview_only_for_explicit_finalizer(self):
+        from django.contrib.auth.models import Permission
+        self.set_individual_analysis()
+        response = self.client.get(self.url)
+        self.assertNotContains(response, 'data-publication-open')
+        self.assertNotContains(response, 'data-publication-dialog')
+        self.user.user_permissions.add(Permission.objects.get(codename="finalize_technicalreport"))
+        response = self.client.get(self.url)
+        self.assertContains(response, 'data-publication-open')
+        self.assertContains(response, 'data-publication-dialog')
+        self.assertContains(response, 'disabled data-publication-confirm data-publication-preview-control')
+        self.assertContains(response, 'Gerar relat', count=None)
+        self.assertContains(response, reverse('signaling:finalize-report', args=[self.point.pk]))
+
+    def test_publication_urls_and_read_link_are_server_controlled(self):
+        from django.contrib.auth.models import Permission
+        from django.test import override_settings
+        self.set_individual_analysis([self.accident_item("synthetic-publication", year=2026)])
+        self.user.user_permissions.add(Permission.objects.get(codename="finalize_technicalreport"))
+        with override_settings(REPORT_FINALIZATION_ENABLED=True), patch("signaling.report_finalization.finalize") as publish:
+            response = self.client.get(self.url, {"analysis":"current-analysis", "year":"2026"})
+            self.assertEqual(response.status_code, 200)
+            self.assertContains(response, 'data-enabled="true"')
+            self.assertContains(response, 'data-report-url=""')
+            self.assertEqual(response.context["publication_url"], reverse("signaling:finalize-report", args=[self.point.pk]) + "?analysis=current-analysis&year=2026")
+            publish.assert_not_called()
+        self.user.user_permissions.add(Permission.objects.get(codename="view_official_reports"))
+        response = self.client.get(self.url)
+        self.assertContains(response, reverse("signaling:report-detail", args=["00000000-0000-0000-0000-000000000000"]))
+
+    def test_report_navigation_without_logout_and_green_publish_icon(self):
+        from django.contrib.auth.models import Permission
+        self.set_individual_analysis()
+        self.user.user_permissions.add(Permission.objects.get(codename="finalize_technicalreport"))
+        response = self.client.get(self.url)
+        self.assertNotContains(response, reverse("logout"))
+        self.assertNotContains(response, "Sair e encerrar")
+        self.assertContains(response, 'data-signaling-auth-notice')
+        self.assertContains(response, 'class="report-page-heading"')
+        self.assertContains(response, 'data-report-back', count=1)
+        self.assertContains(response, 'data-publication-cancel ', count=1)
+        self.assertContains(response, 'btn btn-success report-publish-action')
+        self.assertContains(response, 'icons/signaling/publish-icon.svg')
+        self.assertContains(response, 'Publicar relat&#243;rio oficial')
+        self.assertContains(response, 'Gerar relat')
+
+    def test_publication_modal_has_only_save_badge_and_two_main_actions(self):
+        from django.contrib.auth.models import Permission
+        self.set_individual_analysis()
+        self.user.user_permissions.add(Permission.objects.get(codename="finalize_technicalreport"))
+        response = self.client.get(self.url)
+        self.assertContains(response, 'data-publication-save-status', count=1)
+        for marker in ['data-publication-autosave', 'data-publication-revision', 'data-publication-photos', 'Preparar outro', 'A confer&#234;ncia das fotos']:
+            self.assertNotContains(response, marker)
+        self.assertNotContains(response, 'data-publication-new')
+        self.assertNotContains(response, 'Preparar nova')
+        self.assertContains(response, 'relat&#243;rio oficial imut&#225;vel')
+        self.assertContains(response, 'novo n&#250;mero oficial')
+        self.assertContains(response, 'Verificar publica&#231;&#227;o')
+        self.assertContains(response, 'report-primary-actions')
+
+    def test_opening_stale_analysis_has_safe_filter_marker_and_no_form(self):
+        self.set_individual_analysis()
+        response = self.client.get(self.url + "?analysis=old-analysis")
+        self.assertEqual(response.status_code, 400)
+        self.assertTrue(response["Content-Type"].startswith("text/html"))
+        self.assertContains(response, 'data-report-filter-error', status_code=400)
+        self.assertNotContains(response, 'data-waypoint-report-form', status_code=400)
+        corrected = self.client.get(self.url + "?analysis=current-analysis")
+        self.assertContains(corrected, 'data-waypoint-report-form')
+
+    def test_opening_without_analysis_has_known_empty_state(self):
+        response = self.client.get(self.url)
+        self.assertContains(response, 'data-report-analysis-unavailable')
+        self.assertNotContains(response, 'data-waypoint-report-form')
+
+    def test_opening_missing_and_malformed_credentials_keep_json_contract(self):
+        from django.test import Client
+        direct = Client()
+        direct.cookies = self.client.cookies
+        response = direct.get(self.url)
+        self.assertEqual(response.status_code, 428)
+        self.assertEqual(response.json()["code"], "reservation_required")
+        proof = self.client.reserve(self.point.pk)
+        proof["HTTP_X_WAYPOINT_GENERATION"] = "01"
+        response = direct.get(self.url, **proof)
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["code"], "invalid_reservation_arguments")
+
+    def test_published_consultation_replaces_map_instead_of_opening_competing_map(self):
+        from django.contrib.auth.models import Permission
+        self.set_individual_analysis()
+        self.user.user_permissions.add(Permission.objects.get(codename="finalize_technicalreport"))
+        response = self.client.get(self.url)
+        self.assertContains(response, 'data-publication-report-link target="_top"')
+        self.assertNotContains(response, 'data-publication-report-link target="_blank"')

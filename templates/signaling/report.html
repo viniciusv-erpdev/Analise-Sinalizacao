@@ -4,13 +4,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Relatório do local</title>
+    <title>Relatório Técnico de Segurança Viária</title>
     <link
         rel="stylesheet"
         href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css"
         integrity="sha384-sRIl4kxILFvY47J16cr9ZwB07vP4J8+LH7qKQnuqkuIAvNWLzeN8tE5YBujZqJLB"
         crossorigin="anonymous"
     >
+    <link rel="stylesheet" href="{% static 'css/confirmation-controls.css' %}">
     <style>
         .report-container { max-width: 960px; }
         .report-note { white-space: pre-wrap; overflow-wrap: anywhere; }
@@ -66,32 +67,49 @@
                 grid-column: 3;
             }
         }
+
+        .report-page-heading, .report-publication-heading { display: grid; gap: 12px; grid-template-columns: minmax(0, 1fr); }
+        .report-page-heading > a, .report-publication-heading > button { justify-self: end; }
+        .report-page-heading h1, .report-publication-heading h2 { overflow-wrap: anywhere; }
+        .report-primary-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+        .report-primary-actions > .btn { flex: 1 1 220px; min-height: 44px; margin: 0; display: inline-flex; align-items: center; justify-content: center; }
+        .report-primary-actions > [hidden] { display: none; }
+        .report-save-status { display: inline-block; padding: 4px 10px; border-radius: 4px; font-weight: 600; }
+        .report-save-status--saved { background: #146c43; color: white; }
+        .report-save-status--unsaved { background: #b02a37; color: white; }
+        .report-save-status--saving { background: #e9ecef; color: #212529; }
+        .report-publish-action { display: inline-flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 8px; margin: 8px 0; min-height: 44px; max-width: 100%; }
+        .report-publish-action img { flex: none; }
+        .report-publication-dialog { max-height: calc(100dvh - 24px); overflow: auto; }
+        .report-publication-dialog :is(button,a):focus-visible, .report-page-heading a:focus-visible { outline: 3px solid #236aa5; outline-offset: 3px; }
     </style>
 </head>
 <body class="bg-light">
     <main class="container report-container py-4">
-        {% include "registration/account_controls.html" %}
-        <a
-            class="btn btn-outline-secondary btn-sm mb-3"
-            href="{% url 'analysis' %}"
-        >← Voltar ao mapa</a>
+        <header class="report-page-heading">
+            <a class="btn btn-outline-secondary btn-sm" href="{% url 'analysis' %}" data-report-back>&larr; Voltar ao mapa</a>
+            <h1 class="h3 mb-4">Relatório Técnico de Segurança Viária</h1>
+        </header>
 
-        <h1 class="h3 mb-4">Relatório do local</h1>
-
+        <p class="alert alert-warning" data-signaling-auth-notice hidden role="alert">Sua sess&#227;o expirou. Entre novamente pelo mapa.</p>
         {% if filter_error %}
             <div class="alert alert-danger" role="alert">
                 <h2 class="h5">Não foi possível aplicar os filtros do relatório.</h2>
-                <p class="mb-0">{{ filter_error }}</p>
+                <p class="mb-0" data-report-filter-error>{{ filter_error }}</p>
             </div>
         {% elif not survey %}
-            <div class="alert alert-info" role="status">
+            <div class="alert alert-info" role="status" data-report-analysis-unavailable>
                 <h2 class="h5">Não há uma análise de sinistros individuais disponível.</h2>
                 <p class="mb-0">
                     Carregue os arquivos no modo Todos os sinistros e tente novamente.
                 </p>
             </div>
         {% else %}
-            <form method="post" enctype="multipart/form-data" data-waypoint-report-form novalidate>
+            <form method="post" enctype="multipart/form-data" data-waypoint-report-form data-draft-url="{% url 'signaling:report-draft' point.id %}" novalidate>
+                <p class="small text-secondary mb-3" role="status" aria-live="polite">
+                    <span data-draft-status>Carregando rascunho…</span>
+                    <button type="button" class="btn btn-link btn-sm p-0" data-draft-retry hidden>Tentar novamente</button>
+                </p>
                 {% csrf_token %}
                 {% if form.non_field_errors %}
                     <div class="alert alert-danger" role="alert">
@@ -378,12 +396,53 @@
                     </div>
                 </section>
 
+                <section class="card shadow-sm mb-3">
+                    <div class="card-body">
+                        <label class="h5 card-title d-block" for="{{ form.technical_analysis.id_for_label }}">
+                            {{ form.technical_analysis.label }}
+                        </label>
+                        {{ form.technical_analysis }}
+                        {% for error in form.technical_analysis.errors %}
+                            <div class="invalid-feedback d-block">{{ error }}</div>
+                        {% endfor %}
+                    </div>
+                </section>
+
+                <div class="report-primary-actions">
                 <button class="btn btn-primary" type="submit">
                     Gerar relatório Word
                 </button>
+                {% if can_preview_publication %}
+                <button type="button" class="btn btn-success report-publish-action" data-publication-open data-publication-preview-control><img src="{% static 'icons/signaling/publish-icon.svg' %}" width="20" height="20" alt="" aria-hidden="true"> Publicar relat&#243;rio oficial</button>
+                {% endif %}
+                </div>
             </form>
         {% endif %}
     </main>
+    {% if can_preview_publication %}
+    <dialog class="report-publication-dialog rounded border p-4" style="max-width: min(600px, calc(100vw - 24px));" data-publication-dialog
+            data-enabled="{{ publication_enabled|yesno:'true,false' }}"
+            data-user-id="{{ request.user.pk }}" data-url="{{ publication_url }}"
+            data-status-url="{{ publication_status_url }}" data-retry-url="{{ publication_retry_url }}"
+            data-report-url="{{ publication_report_url }}" aria-labelledby="publication-heading">
+        <header class="report-publication-heading">
+            <button type="button" class="btn btn-outline-secondary confirmation-close" aria-label="Fechar confirmação" title="Fechar confirmação" data-publication-cancel data-publication-preview-control>&times;</button>
+            <h2 id="publication-heading" class="h4">Publicar relat&#243;rio oficial</h2>
+        </header>
+        <p>Waypoint <strong data-publication-point></strong></p>
+        <p>A publica&#231;&#227;o cria um relat&#243;rio oficial imut&#225;vel. Uma nova publica&#231;&#227;o cria outro relat&#243;rio independente, com novo n&#250;mero oficial.</p>
+        <p role="status" aria-live="polite">Status: <span class="report-save-status report-save-status--unsaved" data-publication-save-status>N&#227;o salvo</span></p>
+        <div role="status" aria-live="polite" data-publication-warnings></div>
+        <p role="status" aria-live="polite" data-publication-result></p>
+        <div class="report-publication-actions">
+        <a class="btn btn-outline-primary report-publication-action" data-publication-report-link target="_top" rel="noopener noreferrer" hidden>Consultar relat&#243;rio publicado</a>
+        <button type="button" class="btn btn-primary report-publication-action" disabled data-publication-confirm data-publication-preview-control>Confirmar publica&#231;&#227;o</button>
+        </div>
+        <button type="button" class="btn btn-outline-primary mt-2" data-publication-recover data-publication-preview-control hidden>Verificar publica&#231;&#227;o</button>
+        <button type="button" class="btn btn-outline-primary mt-2" data-publication-retry data-publication-preview-control hidden>Retomar tentativa</button>
+
+    </dialog>
+    {% endif %}
     <script src="{% static 'js/report_characterization.js' %}" defer></script>
 </body>
 </html>

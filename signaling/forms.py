@@ -1,7 +1,7 @@
 from django import forms
 
 from signaling.characterization import (
-    MAX_PGT_ITEMS, MAX_PGT_LENGTH, validate_report_text,
+    MAX_PGT_ITEMS, MAX_PGT_LENGTH, MAX_TECHNICAL_ANALYSIS_LENGTH, validate_report_text,
 )
 
 
@@ -144,6 +144,13 @@ class SignalingReportForm(forms.Form):
             "class": "form-control",
             "accept": "image/jpeg,image/png",
         }),
+    )
+
+    technical_analysis = forms.CharField(
+        label="Análise técnica e considerações finais",
+        required=False, strip=False, max_length=MAX_TECHNICAL_ANALYSIS_LENGTH,
+        validators=[validate_report_text],
+        widget=forms.Textarea(attrs={"class": "form-control", "rows": 6}),
     )
 
     def clean_photos(self):

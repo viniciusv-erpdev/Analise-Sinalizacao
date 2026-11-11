@@ -1,0 +1,2 @@
+# Backward-compatible PoC entry point; share the publication validator pin.
+-r requirements-pdf.txt

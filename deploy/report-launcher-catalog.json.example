@@ -1,0 +1,7 @@
+{
+  "protocol": 1,
+  "enabled": false,
+  "dispatcher_uid": 99999,
+  "private_report_root": "/var/lib/analise/reports",
+  "releases": {}
+}

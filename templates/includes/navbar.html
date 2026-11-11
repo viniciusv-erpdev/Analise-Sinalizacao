@@ -5,6 +5,12 @@
         <span class="app-navbar__title">Análise de Sinistros e Sinalização</span>
     </div>
     <nav class="app-navbar__actions" aria-label="Navegação principal">
+        {% if perms.signaling.view_official_reports %}
+            <a class="app-navbar__link" href="{% url 'signaling:report-library' %}"
+               aria-label="Relat&#243;rios oficiais" title="Relat&#243;rios oficiais">
+                <img src="{% static 'icons/signaling/folder.svg' %}" width="24" height="24" alt="" aria-hidden="true">
+            </a>
+        {% endif %}
         <div class="app-navbar__tools-slot">
             <button id="open-tools-panel" class="open-tools-panel-button" type="button"
                     aria-label="Abrir painel de ferramentas" aria-controls="tools-panel"

@@ -1,10 +1,62 @@
 /* Map/popup/report lifecycle. No credentials are rendered into HTML or persisted. */
 (function (root) {
     "use strict";
-    if (typeof module === "object" && module.exports) module.exports = {create};
+    if (typeof module === "object" && module.exports) module.exports = {create, readReportResponse};
     else root.WaypointReservationUI = {create};
+    // Error HTML is parsed inertly and never inserted into the iframe.
+    function openingError(code, status = 0) {
+        return Object.assign(new Error(code), {code, status});
+    }
+    async function readReportResponse(res) {
+        const type = (res.headers?.get("Content-Type") || "").split(";")[0].trim().toLowerCase();
+        if (res.status === 200 && type === "text/html") {
+            const html = await res.text();
+            const parsed = new DOMParser().parseFromString(html, "text/html");
+            if (parsed.querySelector("[data-waypoint-report-form], [data-report-analysis-unavailable]")) return html;
+            throw openingError("report_invalid_response", 200);
+        }
+        if (res.status === 400 && type === "text/html") {
+            const parsed = new DOMParser().parseFromString(await res.text(), "text/html");
+            const detail = parsed.querySelector("[data-report-filter-error]");
+            if (detail) throw openingError(detail.textContent.trim() === "Os filtros informados pertencem a outra an\u00e1lise."
+                ? "report_analysis_stale" : "report_filters_invalid", 400);
+        }
+        if (res.status < 500 && type === "application/json") {
+            let data;
+            try { data = await res.json(); } catch { /* Never display the response body. */ }
+            const allowed = {400:["invalid_reservation_arguments"], 401:["authentication_required"],
+                403:["permission_denied", "reservation_credentials_invalid", "csrf_failed"],
+                404:["waypoint_not_found"], 409:["reservation_expired", "reservation_inactive", "reservation_generation_stale", "reservation_occupied"],
+                428:["reservation_required"]};
+            if (allowed[res.status]?.includes(data?.code)) throw openingError(data.code, res.status);
+        }
+        throw openingError(({401:"authentication_required",403:"permission_denied",404:"waypoint_not_found",
+            409:"report_conflict",428:"reservation_required"})[res.status] || (res.status >= 500 ? "report_server_error" : "report_invalid_response"), res.status);
+    }
+    function openingFailure(error) {
+        const code = error?.code;
+        if (code === "report_analysis_stale") return {category:"analysis", reload:true,
+            message:"A an\u00e1lise deste mapa est\u00e1 desatualizada. Uma nova an\u00e1lise pode ter sido carregada em outra aba. Atualize o mapa explicitamente para continuar."};
+        if (code === "report_filters_invalid") return {category:"filters", reload:true,
+            message:"Os filtros do relat\u00f3rio n\u00e3o correspondem \u00e0 an\u00e1lise atual. Confira os filtros ou atualize o mapa. Nenhum filtro foi alterado automaticamente."};
+        const messages = {
+            invalid_reservation_arguments:["credentials", "Credenciais de reserva inv\u00e1lidas. Feche o relat\u00f3rio e reabra o waypoint pelo mapa."],
+            reservation_credentials_invalid:["credentials", "A reserva n\u00e3o pertence a esta intera\u00e7\u00e3o. Feche o relat\u00f3rio e confira o waypoint."],
+            reservation_required:["credentials", "Reserva n\u00e3o confirmada. Feche o relat\u00f3rio e use o fluxo normal do waypoint."],
+            permission_denied:["authorization", "Voc\u00ea n\u00e3o tem permiss\u00e3o para abrir este relat\u00f3rio."],
+            authentication_required:["authorization", "Sua sess\u00e3o terminou. Entre novamente pelo mapa."],
+            csrf_failed:["authorization", "N\u00e3o foi poss\u00edvel confirmar sua sess\u00e3o. Confira sua autentica\u00e7\u00e3o pelo mapa."],
+            waypoint_not_found:["not_found", "O waypoint n\u00e3o est\u00e1 dispon\u00edvel. Feche o relat\u00f3rio e atualize o mapa."],
+            network:["network", "Falha de rede ao abrir o relat\u00f3rio. Confira a conex\u00e3o, feche esta tela e tente novamente pelo waypoint."],
+        };
+        if (messages[code]) return {category:messages[code][0],message:messages[code][1]};
+        if (["reservation_expired","reservation_inactive","reservation_generation_stale","reservation_occupied","superseded","report_conflict"].includes(code)) {
+            return {category:"reservation",message:"A reserva foi encerrada, substitu\u00edda ou est\u00e1 em conflito. Feche esta tela e confira o waypoint pelo fluxo normal."};
+        }
+        return {category:"server",message:"N\u00e3o foi poss\u00edvel abrir o relat\u00f3rio devido a uma resposta inesperada do servidor. Feche esta tela e tente novamente. Se persistir, informe o suporte."};
+    }
     function create({manager, document, window, map, markers, canChange, canDelete, canReport, render}) {
-        let current = null, report = null, pollCursor = 0;
+        let current = null, report = null, pollCursor = 0, navigating = false;
         const bindings = new Map();
         const blocked = new WeakMap();
         const guarded = new WeakSet();
@@ -53,6 +105,12 @@
                 }
             });
         }
+        function reportControls(doc, allowed) {
+            controls(doc, allowed, "input[type=file], select, button:not([data-draft-retry]):not([data-publication-preview-control])");
+            doc.querySelectorAll("input:not([type=file]):not([type=hidden]), textarea").forEach(node => {
+                node.readOnly = !allowed; // Preserve selection/copy after losing the lease.
+            });
+        }
         function badge(id, state) {
             const icon = markers.get(id)?.getElement();
             if (!icon) return;
@@ -88,10 +146,14 @@
             badge(state.pointId, state.state);
             bindings.forEach(update);
             if (report) {
-                const allowed = manager.canOperate(report.id) && !report.closing;
-                report.message.textContent = state.message || labels[state.state] || "";
+                if (state.pointId !== report.id || ["idle","lost","closing","release_failed","acquiring","occupied"].includes(state.state)) {
+                    report.invalidated = true; report.draft?.stop();
+                } else if (state.state === "uncertain") report.draft?.pause();
+                else report.draft?.resume();
+                const allowed = manager.canOperate(report.id) && !report.closing && !report.invalidated && !report.publicationBusy;
+                report.message.textContent = report.openFailure?.message || state.message || labels[state.state] || "";
                 const doc = report.frame.contentDocument;
-                if (doc) controls(doc, allowed, "input, textarea, select, button");
+                if (doc) reportControls(doc, allowed);
             }
         });
         function bind(marker, point) {
@@ -130,6 +192,7 @@
             update(binding);
         }
         async function begin(marker,point) {
+            if (navigating) return;
             if (report) { notify("Encerre o relatório antes de trocar de waypoint."); return; }
             current = {marker,point,ready:false};
             try {
@@ -159,12 +222,19 @@
             if (report?.id === id) return; // report owns the same interaction
             if (current?.point.id === id) { current = null; manager.close(); }
         }
-        async function confirm(message) {
-            const dialog = document.createElement("dialog"); dialog.className = "rounded border p-3";
+        async function confirm(message, {closeIcon = false} = {}) {
+            const dialog = document.createElement("dialog"); dialog.className = "waypoint-confirm-dialog rounded border p-3";
             const text = document.createElement("p"); text.textContent = message;
-            const yes = document.createElement("button"); yes.className = "btn btn-danger"; yes.textContent = "Confirmar";
-            const no = document.createElement("button"); no.className = "btn btn-secondary ms-2"; no.textContent = "Cancelar";
-            dialog.append(text,yes,no); document.body.append(dialog);
+            const yes = document.createElement("button"); yes.className = "btn btn-danger waypoint-confirm-dialog__confirm"; yes.textContent = "Confirmar";
+            const no = document.createElement("button"); no.className = "btn btn-secondary waypoint-confirm-dialog__close"; no.textContent = "Cancelar";
+            yes.type = no.type = "button";
+            if (closeIcon) {
+                no.className = "btn btn-outline-secondary waypoint-confirm-dialog__close confirmation-close";
+                no.textContent = "\u00d7";
+                no.setAttribute("aria-label", "Fechar confirma\u00e7\u00e3o");
+                no.setAttribute("title", "Fechar confirma\u00e7\u00e3o");
+            }
+            dialog.append(no,text,yes); document.body.append(dialog);
             return new Promise(resolve => {
                 const done = value => { dialog.close(); dialog.remove(); resolve(value); };
                 yes.onclick = () => done(true); no.onclick = () => done(false);
@@ -172,19 +242,58 @@
                 dialog.showModal();
             });
         }
+        function navigationNotice(text) {
+            notify(text);
+            // The parent document's toast is behind a modal's top layer.
+            if (report) {
+                report.message.textContent = text;
+                report.message.setAttribute("role", "alert");
+            }
+        }
+        async function navigateFromMap(href) {
+            if (navigating) return;
+            if (report?.publicationBusy || report?.draft?.hasPending() || manager.snapshot().busy) {
+                navigationNotice("Conclua as opera\u00e7\u00f5es ou resolva as altera\u00e7\u00f5es pendentes antes de sair.");
+                return;
+            }
+            const destination = new URL(href, window.location.href);
+            if (destination.origin !== new URL(window.location.href).origin) return;
+            navigating = true;
+            try {
+                if (!await manager.leave()) {
+                    navigationNotice("N\u00e3o foi poss\u00edvel confirmar a libera\u00e7\u00e3o da reserva. Confira a conex\u00e3o e tente abrir o relat\u00f3rio novamente. Nenhuma nova reserva foi criada.");
+                    return;
+                }
+                window.location.assign(destination.href);
+            } catch {
+                navigationNotice("N\u00e3o foi poss\u00edvel concluir a sa\u00edda do mapa. Confira a conex\u00e3o e tente novamente.");
+            } finally { navigating = false; }
+        }
         async function openReport(id,url) {
             if (report) return;
             const dialog = document.createElement("dialog");
             dialog.className = "waypoint-report-dialog";
             const closeButton = document.createElement("button");
-            closeButton.className = "btn btn-outline-secondary btn-sm"; closeButton.textContent = "Encerrar relatório";
+            closeButton.className = "btn btn-outline-secondary btn-sm waypoint-report-close"; closeButton.textContent = "\u00d7";
+            closeButton.setAttribute("aria-label", "Fechar relat\u00f3rio");
+            closeButton.setAttribute("title", "Fechar relat\u00f3rio");
             const message = document.createElement("p"); message.className = "small"; message.setAttribute("role","status");
             const frame = document.createElement("iframe"); frame.title = "Relatório de sinalização";
             dialog.append(closeButton,message,frame); document.body.append(dialog);
             const flow = {id, dialog, frame, message, closing:false, url}; report = flow;
-            const finish = () => {
-                if (flow.closing) return;
+            const finish = async () => {
+                if (flow.closing || flow.finishing || flow.publicationBusy) return false;
+                flow.finishing = true;
+                try {
+                    if (flow.draft?.hasPending()) {
+                        if (!flow.invalidated && manager.canOperate(id)) await flow.draft.flush();
+                        if (flow.draft.hasPending() && !await confirm(
+                            "Há alterações não salvas neste relatório. Deseja descartá-las e encerrar? Cancelar mantém os textos abertos.")) return false;
+                    }
+                } finally { flow.finishing = false; }
                 flow.closing = true; report = null;
+                flow.publicationPreview?.destroy();
+                flow.draft?.destroy();
                 flow.observer?.disconnect();
                 dialog.close(); dialog.remove();
                 if (current?.point.id === id && current.marker.isPopupOpen()) {
@@ -194,6 +303,7 @@
                 } else {
                     manager.close(); // No remaining UI owner: drain work before release.
                 }
+                return true;
             };
             closeButton.onclick = finish;
             dialog.addEventListener("cancel",event => { event.preventDefault(); finish(); });
@@ -203,29 +313,46 @@
                 return {ok:true,status:200,json:async () => data};
             }
             function show(html) {
-                if (flow.closing || report !== flow) return;
+                if (flow.closing || flow.invalidated || report !== flow) return;
                 frame.onload = () => {
-                    if (flow.closing) return;
+                    if (flow.closing || flow.invalidated) return;
                     const doc = frame.contentDocument, win = frame.contentWindow;
                     win.waypointReservationRequest = request;
+                    if (flow.draft) flow.draft.attach(doc);
+                    else if (window.ReportDraft) flow.draft = window.ReportDraft.mount({manager,pointId:id,doc});
+                    flow.publicationPreview?.destroy();
+                    if (window.ReportPublicationPreview) flow.publicationPreview = window.ReportPublicationPreview.mount({
+                        doc, pointId:id, manager, draft:flow.draft,
+                        flowFactory:window.ReportPublicationFlow, environment:window,
+                        onBusy(busy) {
+                            flow.publicationBusy = busy;
+                            if (report === flow && !flow.closing) reportControls(doc,
+                                manager.canOperate(id) && !flow.invalidated && !busy);
+                        },
+                    });
                     flow.observer?.disconnect();
-                    flow.observer = new MutationObserver(() => controls(doc,
-                        manager.canOperate(id) && !flow.closing, "input, textarea, select, button"));
+                    flow.observer = new MutationObserver(() => reportControls(doc,
+                        manager.canOperate(id) && !flow.closing && !flow.invalidated && !flow.publicationBusy));
                     flow.observer.observe(doc,{subtree:true,childList:true,attributes:true,attributeFilter:["disabled"]});
-                    controls(doc,manager.canOperate(id), "input, textarea, select, button");
+                    reportControls(doc,manager.canOperate(id) && !flow.invalidated);
                     doc.addEventListener("submit",async event => {
                         event.preventDefault();
                         if (!event.target.matches("[data-waypoint-report-form]")) {
                             if (manager.snapshot().busy) { message.textContent = "Aguarde a operação em andamento antes de sair."; return; }
                             // Account logout: retain native POST + CSRF after release.
+                            if (flow.draft?.hasPending()) {
+                                message.textContent = "Encerre o relatório e resolva as alterações pendentes antes de sair."; return;
+                            }
                             const form = event.target; await manager.close();
                             form.target = "_top"; win.HTMLFormElement.prototype.submit.call(form);
                             return;
                         }
                         const form = event.target;
-                        if (form.dataset.sending === "true" || !manager.canOperate(id)) return;
+                        if (form.dataset.sending === "true" || flow.publicationBusy || !manager.canOperate(id)) return;
                         form.dataset.sending = "true";
                         try {
+                            if (flow.draft) await flow.draft.flush();
+                            if (flow.closing || flow.invalidated || !manager.canOperate(id)) return;
                             const result = await manager.perform(id,flow.url,{method:"POST",body:new win.FormData(form)},
                                 async res => {
                                     const type = res.headers.get("Content-Type") || "";
@@ -233,7 +360,7 @@
                                     if (!res.ok) throw new Error("Não foi possível gerar o relatório.");
                                     return {blob:await res.blob()};
                                 });
-                            if (flow.closing) return;
+                            if (flow.closing || flow.invalidated) return;
                             if (result.html) show(result.html);
                             else {
                                 const objectUrl = URL.createObjectURL(result.blob);
@@ -246,6 +373,11 @@
                     });
                     doc.addEventListener("click",event => {
                         const link = event.target.closest("a");
+                        if (link?.hasAttribute?.("data-publication-report-link")) {
+                            event.preventDefault();
+                            void navigateFromMap(link.getAttribute("href"));
+                            return;
+                        }
                         if (!link || link.target === "_blank") return;
                         event.preventDefault();
                         if (link.getAttribute("href") === "/") finish();
@@ -254,19 +386,48 @@
                 };
                 // Set only a public base URL; proof remains in the parent manager's closure.
                 const parsed = new DOMParser().parseFromString(html,"text/html");
+                if (flow.draft?.hasPending() && parsed.querySelector && !parsed.querySelector("[data-waypoint-report-form]")) {
+                    message.textContent = "Não foi possível atualizar o relatório. Seus textos foram mantidos; confira a análise e os filtros.";
+                    return;
+                }
                 const base = parsed.createElement("base"); base.href = new URL(flow.url,window.location.href).href;
                 // Embedded screen layout only; standalone/print styles stay unchanged.
                 const embeddedStyle = parsed.createElement("style");
                 embeddedStyle.textContent = "@media screen { html .report-accidents { max-height: none; } }";
+                const embeddedBack = parsed.querySelector?.("[data-report-back]");
+                if (embeddedBack) embeddedBack.remove(); // The parent dialog owns the single close control.
                 parsed.head.prepend(base,embeddedStyle); frame.srcdoc = "<!doctype html>" + parsed.documentElement.outerHTML;
             }
+            message.textContent = "Abrindo relat\u00f3rio...";
             try {
-                const html = await manager.perform(id,url,{},async res => {
-                    if (!res.ok) throw new Error("Não foi possível abrir o relatório.");
-                    return res.text();
-                });
+                const html = await manager.perform(id,url,{},readReportResponse,{consumeErrors:true});
+                if (flow.closing || flow.invalidated || report !== flow) return;
+                message.textContent = "";
                 show(html);
-            } catch (error) { message.textContent = error.message; }
+            } catch (error) {
+                if (flow.closing || report !== flow) return;
+                const failure = openingFailure(error);
+                flow.openFailure = failure;
+                frame.hidden = true;
+                message.textContent = failure.message;
+                message.setAttribute("role", "alert");
+                // Fixed categories/status only: never log URL, payload, proof or exception.
+                window.console?.warn("report_open_failed", {category:failure.category, status:Number.isInteger(error?.status) ? error.status : 0});
+                if (failure.reload) {
+                    const recovery = document.createElement("div");
+                    const refreshMap = document.createElement("button");
+                    refreshMap.type = "button"; refreshMap.className = "btn btn-outline-primary";
+                    refreshMap.textContent = "Atualizar mapa";
+                    recovery.style.alignSelf = "start";
+                    refreshMap.onclick = async () => {
+                        if (refreshMap.disabled || flow.closing) return;
+                        refreshMap.disabled = true;
+                        try { if (await finish()) window.location.reload(); }
+                        finally { refreshMap.disabled = false; }
+                    };
+                    recovery.append(refreshMap); dialog.append(recovery);
+                }
+            }
         }
         // Bounded advisory polling, never acquisition. Hidden tabs do no status polling.
         let polling = false;
@@ -298,31 +459,46 @@
         document.addEventListener("visibilitychange",() => {
             if (document.hidden) manager.suspend(); else manager.resume();
         });
+        window.addEventListener("beforeunload",event => {
+            if (report?.publicationBusy || report?.draft?.hasPending()) { event.preventDefault(); event.returnValue = ""; }
+        });
+        window.addEventListener("online",() => { if (report && !report.invalidated) void manager.resume(); });
         window.addEventListener("pagehide",() => manager.leave());
         window.addEventListener("pageshow",async () => {
             await manager.resume();
             if (report && manager.snapshot().pointId !== report.id) {
                 // BFCache must not restore a form tied to an ended acquisition.
-                report.closing = true; report.observer?.disconnect();
-                report.dialog.close(); report.dialog.remove(); report = null;
+                if (report.draft?.hasPending()) {
+                    report.invalidated = true; report.draft.stop();
+                    reportControls(report.frame.contentDocument,false);
+                } else {
+                    report.closing = true; report.publicationPreview?.destroy(); report.draft?.destroy(); report.observer?.disconnect();
+                    report.dialog.close(); report.dialog.remove(); report = null;
+                }
             }
             bindings.forEach(update);
         });
         // Navigation/logout are blocked while a server operation may still be running.
         document.addEventListener("submit",event => {
             if (event.target.closest(".leaflet-popup")) return;
-            if (manager.snapshot().busy) {
+            if (report?.publicationBusy || report?.draft?.hasPending() || manager.snapshot().busy) {
                 event.preventDefault(); event.stopImmediatePropagation();
-                notify("Aguarde a operação em andamento antes de sair.");
+                notify("Conclua as operações ou encerre o relatório resolvendo as alterações pendentes antes de sair.");
             } else manager.leave();
         },true);
         document.addEventListener("click",event => {
             const link = event.target.closest("a");
             if (!link || link.closest(".leaflet-popup") || link.target === "_blank" || link.getAttribute("href")?.startsWith("#")) return;
-            if (manager.snapshot().busy) {
+            if (report?.publicationBusy || report?.draft?.hasPending() || manager.snapshot().busy) {
                 event.preventDefault(); event.stopImmediatePropagation();
-                notify("Aguarde a operação em andamento antes de sair.");
-            } else manager.leave();
+                notify("Conclua as operações ou encerre o relatório resolvendo as alterações pendentes antes de sair.");
+            } else {
+                if (event.defaultPrevented || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey || (event.button !== undefined && event.button !== 0) || link.hasAttribute?.("download")) return;
+                const href = link.getAttribute("href");
+                if (!href || new URL(href,window.location.href).origin !== new URL(window.location.href).origin) return;
+                event.preventDefault();
+                void navigateFromMap(href);
+            }
         },true);
         function isOpen(id) {
             return current?.point.id === id || report?.id === id;
@@ -330,8 +506,13 @@
         function invalidate(id) {
             manager.invalidate(id);
             if (report?.id === id) {
-                report.closing = true; report.observer?.disconnect();
-                report.dialog.close(); report.dialog.remove(); report = null;
+                if (report.draft?.hasPending()) {
+                    report.invalidated = true; report.draft.stop();
+                    reportControls(report.frame.contentDocument,false);
+                } else {
+                    report.closing = true; report.publicationPreview?.destroy(); report.draft?.destroy(); report.observer?.disconnect();
+                    report.dialog.close(); report.dialog.remove(); report = null;
+                }
             }
             if (current?.point.id === id) current = null;
             notify("Este waypoint foi excluído. Os detalhes foram encerrados.");

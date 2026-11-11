@@ -432,7 +432,7 @@ function buildExistingPointPopup(point) {
     return `
         <article class="signaling-popup" data-signaling-point-id="${point.id}">
             <header class="signaling-popup__header">
-                <h2>${signalingStatuses[point.status].popupLabel}</h2>
+                <div><h2>Waypoint #${point.id}</h2><p class="signaling-popup__status">${signalingStatuses[point.status].popupLabel}</p></div>
                 <button
                     class="btn btn-outline-secondary btn-sm"
                     type="button"
@@ -617,7 +617,7 @@ function buildInterventionForm(point) {
                     data-back-to-signaling
                 >&larr; Voltar</button>
             </div>
-            <p class="small text-secondary mb-2">Adicionar intervenção</p>
+            <p class="small text-secondary mb-2">Waypoint #${point.id} &middot; Adicionar intervenção</p>
             <input type="hidden" name="type" value="">
             <div class="signaling-catalog">
                 <button
@@ -782,7 +782,7 @@ function showPointPopup(marker, point) {
         canEdit: () => waypointReservations.canOperate(point.id),
         onRender: () => reservationUI.bind(marker, point),
         onBack: () => showPointPopup(marker, point),
-        confirm: (message) => reservationUI.confirm(message),
+        confirm: (message) => reservationUI.confirm(message, {closeIcon: true}),
     };
     IntersectionProblems.open({
         ...problemOptions, container: popupElement.querySelector("[data-point-problems]"),
@@ -971,7 +971,7 @@ function showPointPopup(marker, point) {
         const confirmed = await reservationUI.confirm(
             "Excluir este ponto?\n\n" +
             "Todas as sinalizações cadastradas neste local " +
-            "também serão removidas."
+            "também serão removidas.", {closeIcon: true}
         );
         if (!confirmed) {
             return;
@@ -1162,7 +1162,7 @@ function addSignalingMarker(point) {
     });
 
     point.interventions = point.interventions || [];
-    marker.bindPopup(buildExistingPointPopup(point), {maxWidth: 390});
+    marker.bindPopup(buildExistingPointPopup(point), {maxWidth: 390, className:"signaling-waypoint-popup"});
     marker.on("popupopen", () => {
         showPointPopup(marker, point);
         reservationUI.begin(marker, point);

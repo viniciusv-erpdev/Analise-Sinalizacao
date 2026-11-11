@@ -1373,8 +1373,16 @@
             }
         }
 
+
+        .signaling-waypoint-popup .leaflet-popup-content { padding-top: 28px; }
+        .signaling-waypoint-popup .leaflet-popup-close-button { width: 36px; height: 36px; line-height: 36px; font-size: 24px; }
+        .signaling-waypoint-popup .leaflet-popup-close-button:focus-visible { outline: 3px solid #236aa5; outline-offset: -3px; }
+        .signaling-popup__header { align-items: flex-start; }
+        .signaling-popup__header > div { min-width: 0; }
+        .signaling-popup__status { font-size: 12px; color: #526577; margin: 4px 0 8px; }
     </style>
     <link rel="stylesheet" href="{% static 'css/app-shell.css' %}">
+    <link rel="stylesheet" href="{% static 'css/confirmation-controls.css' %}">
 
 </head>
 
@@ -1827,6 +1835,10 @@
 
     <script src="{% static 'js/waypoint_sync.js' %}"></script>
     <script src="{% static 'js/waypoint_reservations.js' %}"></script>
+    <script src="{% static 'js/report_finalization.js' %}"></script>
+    <script src="{% static 'js/report_draft.js' %}"></script>
+    <script src="{% static 'js/report_publication_flow.js' %}"></script>
+    <script src="{% static 'js/report_publication_preview.js' %}"></script>
     <script src="{% static 'js/waypoint_reservation_ui.js' %}"></script>
     <script src="{% static 'js/intersection_problems.js' %}"></script>
 

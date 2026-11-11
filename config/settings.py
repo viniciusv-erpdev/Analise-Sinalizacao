@@ -166,3 +166,25 @@ registration_value = os.environ.get("DJANGO_REGISTRATION_ENABLED", "True").strip
 if registration_value not in {"true", "false", "1", "0", "yes", "no", "on", "off"}:
     raise ImproperlyConfigured("DJANGO_REGISTRATION_ENABLED must be true/false, 1/0, yes/no or on/off.")
 REGISTRATION_ENABLED = registration_value in {"true", "1", "yes", "on"}
+
+
+# Synchronous official finalization is for homologation only, opt-in.
+REPORT_FINALIZATION_ENABLED = os.environ.get("REPORT_FINALIZATION_ENABLED", "false").lower() == "true"
+# Independent rollout gates. Never imply that merely admitting an internal intent
+# enables the HTTP integration or the local dispatcher.
+REPORT_ASYNC_PUBLICATION_ENABLED = os.environ.get("REPORT_ASYNC_PUBLICATION_ENABLED", "false").lower() == "true"
+REPORT_DISPATCH_ENABLED = os.environ.get("REPORT_DISPATCH_ENABLED", "false").lower() == "true"
+REPORT_DISPATCH_DSN = os.environ.get("REPORT_DISPATCH_DSN", "")
+# Internal admission only; no HTTP admission route is installed.
+# Enabling this gate blocks new synchronous publications/retries.
+REPORT_ADMISSION_ENABLED = os.environ.get("REPORT_ADMISSION_ENABLED", "false").lower() == "true"
+# Manual independent executor; opt-in independently of admitting new intentions.
+REPORT_EXECUTOR_ENABLED = os.environ.get("REPORT_EXECUTOR_ENABLED", "false").lower() == "true"
+# Preparation only: no privileged launcher or recovery is installed.
+REPORT_SYSTEMD_SUPERVISION_ENABLED = os.environ.get("REPORT_SYSTEMD_SUPERVISION_ENABLED", "false").lower() == "true"
+REPORT_EXECUTOR_RELEASE_ID = os.environ.get("REPORT_EXECUTOR_RELEASE_ID", "")
+REPORT_EXECUTOR_SYSTEMD_USER = os.environ.get("REPORT_EXECUTOR_SYSTEMD_USER", "")
+REPORT_PRIVATE_ROOT = os.environ.get("REPORT_PRIVATE_ROOT", "")
+REPORT_LIBREOFFICE_EXECUTABLE = os.environ.get("REPORT_LIBREOFFICE_EXECUTABLE") or None
+REPORT_CONVERSION_TIMEOUT = 60
+REPORT_EXECUTION_SECONDS = 900

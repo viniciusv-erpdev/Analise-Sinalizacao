@@ -1,0 +1,2 @@
+# Required by official publication: structural validation is not optional.
+pypdf==6.21.3

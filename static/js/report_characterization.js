@@ -38,6 +38,7 @@
         const maxLength = Number(editor.dataset.maxLength);
         const inputs = () => Array.from(rows.querySelectorAll("textarea"));
         let searching = false;
+        const changed = () => document.defaultView?.waypointDraftChanged?.();
 
         function notify(message, warning = false) {
             notice.textContent = message;
@@ -69,13 +70,14 @@
             row.append(input, remove);
             rows.append(row);
             if (!value) input.focus();
+            changed();
             return true;
         }
 
         addButton.addEventListener("click", () => addRow());
         rows.addEventListener("click", (event) => {
             const button = event.target.closest("[data-pgt-remove]");
-            if (button) button.closest("[data-pgt-row]").remove();
+            if (button) { button.closest("[data-pgt-row]").remove(); changed(); }
         });
         searchButton.addEventListener("click", async () => {
             if (searching) return;
@@ -126,6 +128,7 @@
                         added += 1;
                     }
                 });
+                if (added) changed();
                 if (added < additions.length) {
                     notify("Limite de " + maxItems + " locais atingido. Algumas sugestões não foram adicionadas.", true);
                 } else if (!data.results.length) {

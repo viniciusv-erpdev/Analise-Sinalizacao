@@ -204,7 +204,8 @@ class ReservationEndpointTests(TestCase):
         buffer = BytesIO(b"generated-docx")
         baseline = len(connection.savepoint_ids)
 
-        def generate(point, survey, *args):
+        def generate(point, survey, *args, author):
+            self.assertEqual(author.pk, self.user.pk)
             self.assertEqual(len(connection.savepoint_ids), baseline)
             self.assertEqual(survey["interventions"][0]["notes"], "")
             self.post("release-reservation", headers=proof)

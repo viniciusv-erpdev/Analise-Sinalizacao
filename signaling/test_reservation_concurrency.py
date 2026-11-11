@@ -121,6 +121,38 @@ class PostgreSQLReservationConcurrencyTests(TransactionTestCase):
         self.assertEqual(grants[0].credentials.generation, 1)
         self.assert_current(grants[0])
 
+    def test_different_users_cannot_claim_same_waypoint_concurrently(self):
+        from django.test import Client
+        other = Client()
+        authorize(other, self.reservation_permissions)
+        other_identity = r.ReservationIdentity(other.session.session_key)
+        def acquire_other():
+            return r.acquire_reservation(point_id=self.point.pk, identity=other_identity, interaction_id=uuid4())
+        results = self.race(self.acquire, acquire_other)
+        self.assertEqual(sum(isinstance(value, r.ReservationGrant) for value in results), 1)
+        self.assertIn(r.ReservationOccupied, results)
+        self.assertEqual(WaypointReservation.objects.filter(signaling_point=self.point).count(), 1)
+
+    def test_navigation_release_concurrent_with_renewal_never_leaves_active_owner(self):
+        grant = self.acquire()
+        results = self.race(lambda: self.renew(grant), lambda: self.release(grant))
+        self.assertIn(True, results)
+        renewed = next(result for result in results if result is not True)
+        self.assertTrue(isinstance(renewed, r.ReservationGrant) or renewed is r.ReservationInactive)
+        row = WaypointReservation.objects.get(signaling_point=self.point)
+        self.assertIsNotNone(row.released_at)
+        fresh = self.acquire()
+        self.assertEqual(fresh.credentials.generation, grant.credentials.generation + 1)
+        self.assert_current(fresh)
+
+    def test_duplicate_navigation_releases_are_safe_under_postgresql_locks(self):
+        grant = self.acquire()
+        self.assertEqual(self.race(lambda: self.release(grant), lambda: self.release(grant)), (True, True))
+        self.assertIsNotNone(WaypointReservation.objects.get(signaling_point=self.point).released_at)
+        fresh = self.acquire()
+        self.assertEqual(fresh.credentials.generation, grant.credentials.generation + 1)
+        self.assert_current(fresh)
+
     def test_acquisition_concurrent_with_renewal(self):
         grant = self.acquire()
         results = self.race(self.acquire, lambda: self.renew(grant))

@@ -1,11 +1,14 @@
-from datetime import date
+from datetime import date, datetime, timezone as dt_timezone
 from io import BytesIO
 from pathlib import Path
 from unittest.mock import patch
 from zipfile import ZipFile, is_zipfile
 from xml.etree import ElementTree
 
+from django.contrib.auth import get_user_model
+from django.contrib.auth.models import AnonymousUser
 from django.test import TestCase
+from django.utils import timezone
 from docx import Document
 from PIL import Image
 
@@ -23,6 +26,7 @@ from signaling.report_generator import (
 
 class SignalingReportGeneratorTests(TestCase):
     def setUp(self):
+        self.author = get_user_model().objects.create_user(username="analista-docx", first_name="Maria", last_name="Silva")
         self.point = SignalingPoint.objects.create(
             latitude=-21.17,
             longitude=-47.81,
@@ -54,6 +58,7 @@ class SignalingReportGeneratorTests(TestCase):
             self.survey,
             kwargs.get("form_data"),
             kwargs.get("photos", ()),
+            author=kwargs.get("author", self.author),
         )
 
     def document_text(self, report: BytesIO) -> str:
@@ -79,7 +84,7 @@ class SignalingReportGeneratorTests(TestCase):
 
         self.assertIsInstance(report, BytesIO)
         self.assertTrue(is_zipfile(report))
-        self.assertIn("Relatório do local", self.document_text(report))
+        self.assertIn("Relatório Técnico de Segurança Viária", self.document_text(report))
 
     def test_all_docx_xml_parts_are_well_formed_and_word_compatible(self):
         self.survey["accidents"] = [{
@@ -125,7 +130,7 @@ class SignalingReportGeneratorTests(TestCase):
             )
 
         reopened = Document(BytesIO(generated_bytes))
-        self.assertIn("Relatório do local", reopened.paragraphs[0].text)
+        self.assertIn("Relatório Técnico de Segurança Viária", reopened.paragraphs[0].text)
 
     def test_includes_form_and_survey_data(self):
         report = self.generate(form_data={
@@ -339,3 +344,58 @@ class SignalingReportGeneratorTests(TestCase):
     def test_rejects_invalid_photo_with_friendly_error(self):
         with self.assertRaisesMessage(InvalidReportImage, "JPEG ou PNG válida"):
             self.generate(photos=[BytesIO(b"not an image")])
+
+
+    def test_technical_analysis_is_after_photos_with_existing_heading_style(self):
+        analysis = "Avaliação técnica.\nPriorizar a travessia de pedestres."
+        document = Document(self.generate(form_data={"technical_analysis": analysis}))
+        paragraphs = document.paragraphs
+        texts = [paragraph.text for paragraph in paragraphs]
+        heading = texts.index("Análise técnica e considerações finais")
+        self.assertGreater(heading, texts.index("Fotos do local"))
+        self.assertEqual(paragraphs[heading].style.name, "Heading 1")
+        self.assertEqual(texts[heading+1], analysis)
+        self.assertGreater(texts.index("Autoria"), heading)
+        self.assertTrue(texts[-2].startswith("Autor da geração:"))
+        self.assertTrue(texts[-1].startswith("Data de emissão:"))
+
+    def test_empty_technical_analysis_keeps_section_and_author(self):
+        for value in (None, ""):
+            with self.subTest(value=value):
+                document = Document(self.generate(form_data={"technical_analysis": value}))
+                texts = [p.text for p in document.paragraphs]
+                self.assertEqual(texts[texts.index("Análise técnica e considerações finais")+1], "Não informado")
+                self.assertIn("Autor da geração: Maria Silva (analista-docx)", texts)
+
+    def test_author_falls_back_to_authenticated_username(self):
+        self.author.first_name = ""
+        self.author.last_name = ""
+        text = self.document_text(self.generate())
+        self.assertIn("Autor da geração: analista-docx", text)
+
+    def test_anonymous_author_is_rejected(self):
+        with self.assertRaisesMessage(ValueError, "autor autenticado"):
+            self.generate(author=AnonymousUser())
+
+    def test_issuance_uses_server_clock_and_configured_timezone_once(self):
+        instant = datetime(2026, 10, 28, 1, 4, 5, tzinfo=dt_timezone.utc)
+        with self.settings(TIME_ZONE="America/Sao_Paulo"), timezone.override(None):
+            with patch("signaling.report_generator.timezone.now", return_value=instant) as clock:
+                text = self.document_text(self.generate())
+        self.assertEqual(clock.call_count, 1)
+        self.assertIn("Data de emissão: 27/10/2026 às 22:04:05", text)
+        self.assertIn("(-0300)", text)
+        with self.settings(TIME_ZONE="UTC"), timezone.override(None):
+            with patch("signaling.report_generator.timezone.now", return_value=instant):
+                text = self.document_text(self.generate())
+        self.assertIn("Data de emissão: 28/10/2026 às 01:04:05 UTC (+0000)", text)
+
+    def test_browser_authorship_and_issuance_values_are_not_used(self):
+        text = self.document_text(self.generate(form_data={
+            "author": "Autor falsificado", "issued_at": "Data falsificada",
+            "technical_analysis": "Análise preservada",
+        }))
+        self.assertNotIn("Autor falsificado", text)
+        self.assertNotIn("Data falsificada", text)
+        self.assertIn("Maria Silva (analista-docx)", text)
+        self.assertIn("Análise preservada", text)

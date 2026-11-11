@@ -1,0 +1,39 @@
+-- REFERENCE ONLY. Review role names, DB ownership, pg_hba and schema first.
+-- Stage 5B complete HML policy: scripts/report_permission_policy.py.
+-- Generate the reviewed transactional plan with python -m scripts.report_hml_plan.
+-- This historical authority-only example is NOT the HTTP/executor provisioning plan.
+-- Apply only in a separate authorized operation. Not executed by migrations.
+-- Never reuse the Gunicorn DB role as either authority role.
+CREATE ROLE report_launcher_owner NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE;
+CREATE ROLE report_launcher_runtime LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT;
+CREATE ROLE report_dispatch_runtime LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT;
+-- Authentication must be configured separately; no embedded password/defaults.
+GRANT USAGE ON SCHEMA public TO report_launcher_owner,report_launcher_runtime,report_dispatch_runtime;
+-- public must not be writable by untrusted roles; review before changing schema grants.
+GRANT SELECT ON public.signaling_reportlaunch,public.signaling_reportlauncherreceipt,
+ public.signaling_reportoperationalevent,public.signaling_reportpublicationslot,
+ public.signaling_reportfinalizationattempt,public.signaling_reportexecutionidentity,
+ public.signaling_technicalreportversion,public.signaling_technicalreport,
+ public.signaling_reportreleaseauthorization,public.signaling_reportdeploymentbarrier,
+ public.signaling_reportartifact TO report_launcher_owner;
+GRANT UPDATE ON public.signaling_reportpublicationslot,public.signaling_reportfinalizationattempt,
+ public.signaling_reportexecutionidentity,public.signaling_reportlaunch TO report_launcher_owner;
+GRANT INSERT ON public.signaling_reportlauncherreceipt,public.signaling_reportoperationalevent TO report_launcher_owner;
+ALTER FUNCTION public.report_launcher_envelope(uuid) OWNER TO report_launcher_owner;
+ALTER FUNCTION public.report_launcher_status(uuid) OWNER TO report_launcher_owner;
+ALTER FUNCTION public.report_launcher_consume(uuid,uuid,uuid,integer,text,uuid,text,jsonb) OWNER TO report_launcher_owner;
+ALTER FUNCTION public.report_launcher_job(uuid,uuid,bigint) OWNER TO report_launcher_owner;
+GRANT EXECUTE ON FUNCTION public.report_launcher_envelope(uuid),public.report_launcher_status(uuid),
+ public.report_launcher_consume(uuid,uuid,uuid,integer,text,uuid,text,jsonb),
+ public.report_launcher_job(uuid,uuid,bigint) TO report_launcher_runtime;
+GRANT SELECT ON public.report_dispatch_projection TO report_dispatch_runtime;
+-- Stage 4C.4. No grant is installed by migration; review/apply separately.
+GRANT SELECT ON public.signaling_reportdispatchdelivery TO report_launcher_owner;
+GRANT INSERT ON public.signaling_reportexecutionidentity,public.signaling_reportlaunch,
+ public.signaling_reportdispatchdelivery TO report_launcher_owner;
+ALTER FUNCTION public.report_dispatch_candidate() OWNER TO report_launcher_owner;
+ALTER FUNCTION public.report_dispatch_prepare(uuid,uuid,uuid,text,text,text,uuid) OWNER TO report_launcher_owner;
+GRANT EXECUTE ON FUNCTION public.report_dispatch_candidate(),
+ public.report_dispatch_prepare(uuid,uuid,uuid,text,text,text,uuid) TO report_dispatch_runtime;
+-- No raw table grants, consumption rights, HTTP credentials or storage access
+-- to dispatcher. Gunicorn must have NO membership in either runtime role.

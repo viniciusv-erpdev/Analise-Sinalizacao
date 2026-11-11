@@ -71,6 +71,7 @@
             if (active !== entry || entry.closing) throw new ReservationError("superseded");
         }
         function fail(entry, error) {
+            if (error.code === "draft_revision_conflict") return;
             if (["network","invalid_response"].includes(error.code)) {
                 entry.trusted = false; emit(entry, "uncertain", error);
             }
@@ -226,7 +227,7 @@
                 // Conservative freshness guard after timer suspension; not an expiry decision.
                 && now() - active.confirmedAt < interval * 2;
         }
-        async function perform(id, url, init = {}, consume = json) {
+        async function perform(id, url, init = {}, consume = json, responseOptions = {}) {
             const entry = active;
             if (!entry || entry.id !== id || !canOperate(id)) throw new ReservationError("reservation_required");
             entry.busy++; emit(entry, entry.state);
@@ -235,7 +236,8 @@
                 const res = await response(url, {...init, headers: {...init.headers, ...proof(entry),
                     ...((init.method || "GET") !== "GET" ? {"X-CSRFToken": options.csrf()} : {})}});
                 if (res.redirected) throw new ReservationError("authentication_required",401);
-                if (!res.ok && res.status !== 400) await json(res);
+                // Opt-in consumers classify business responses; the default protocol is unchanged.
+                if (!res.ok && res.status !== 400 && !responseOptions.consumeErrors) await json(res);
                 const result = await consume(res); // keep lease through streamed body consumption
                 current(entry);
                 // Server already fences output; confirm again after slow network transfer.
@@ -306,13 +308,17 @@
             // Best effort only; do not release a lease while work is still outstanding.
             intent++;
             active = null;
+            const releases = [];
             for (const entry of entries) {
                 entry.closing = true; emit(entry,"closing");
                 if (!entry.busy && !entry.acquiring && entry.token) {
-                    release(entry,true);
+                    releases.push(release(entry,true));
                 }
                 // Busy work retains its heartbeat and drains through perform()'s finally.
             }
+            // Controlled navigation waits; pagehide remains best effort. Never reject
+            // an ignored pagehide promise or call a pending release twice.
+            return Promise.all(releases).then(() => entries.size === 0);
         }
         return {acquire, close, renew: () => renew(), perform, status, canOperate,
             snapshot: () => snapshot(), suspend, resume, leave, invalidate,

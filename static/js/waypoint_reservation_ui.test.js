@@ -27,7 +27,7 @@ function fixture({change=true,occupied=false}={}) {
     const document={body,createElement:tag=>new Node(tag),getElementById:()=>null,
         addEventListener:(event,fn)=>events[event]=fn};
     const window={setInterval:(fn,ms)=>{fn.interval=ms;intervals.push(fn);return 1;},clearInterval(){},
-        addEventListener:(event,fn)=>windows[event]=fn,location:{pathname:"/",href:"http://localhost/"}};
+        addEventListener:(event,fn)=>windows[event]=fn,location:{pathname:"/",href:"http://localhost/",assign(url){calls.push(["navigate",url]);}}};
     let state={pointId:null,state:"idle",busy:0},listener;
     const calls=[];
     const emit=next=>{state={...state,...next};listener?.(state);};
@@ -39,7 +39,7 @@ function fixture({change=true,occupied=false}={}) {
             emit({pointId:id,state:"active"});},
         async close(){calls.push(["close"]);emit({pointId:null,state:"idle"});},
         async perform(){return [{id:7,status:"OK"}];},
-        status:async()=>({state:"available"}),leave(){calls.push(["leave"]);},
+        status:async()=>({state:"available"}),async leave(){calls.push(["leave"]);emit({pointId:null,state:"idle"});return true;},
         suspend(){emit({state:"uncertain"});},resume(){calls.push(["resume"]);},
     };
     let renderCount=0;
@@ -52,8 +52,34 @@ function fixture({change=true,occupied=false}={}) {
     function bind(){const old=global.MutationObserver;global.MutationObserver=class{observe(){}disconnect(){}};
         try{ui.bind(marker,point);}finally{global.MutationObserver=old;}}
     return {ui,manager,point,marker,write,read,root,calls,emit,events,windows,intervals,bind,
-        get renders(){return renderCount;},body};
+        get renders(){return renderCount;},body,window,document};
 }
+
+test("deletion confirmation X and Escape cancel without reservation side effects; confirm still accepts",async()=>{
+    const f=fixture();
+    for (const action of ["close","escape","confirm"]) {
+        const pending=f.ui.confirm("Excluir?",{closeIcon:true});
+        const dialog=f.body.children.at(-1),[close,text,yes]=dialog.children;
+        assert.equal(close.tag,"button");assert.equal(close.type,"button");
+        assert.equal(close.textContent,"\u00d7");
+        assert.equal(close.getAttribute("aria-label"),"Fechar confirma\u00e7\u00e3o");
+        assert.equal(close.getAttribute("title"),"Fechar confirma\u00e7\u00e3o");
+        assert.match(close.className,/confirmation-close/);
+        assert.equal(text.textContent,"Excluir?");assert.equal(yes.textContent,"Confirmar");
+        if(action==="close")close.onclick();
+        else if(action==="confirm")yes.onclick();
+        else {let prevented=false;dialog.events.cancel[0]({preventDefault(){prevented=true;}});assert.equal(prevented,true);}
+        assert.equal(await pending,action==="confirm");
+        assert.equal(dialog.removed,true);assert.deepEqual(f.calls,[]);
+    }
+});
+
+test("unrelated unsaved-text confirmation retains its Cancelar control",async()=>{
+    const f=fixture(),pending=f.ui.confirm("Descartar textos?");
+    const dialog=f.body.children.at(-1);
+    assert.equal(dialog.children[0].textContent,"Cancelar");
+    dialog.children[0].onclick();assert.equal(await pending,false);
+});
 test("popup stays read-only until acquisition and refresh complete; loss disables mutations only",async()=>{
     const f=fixture();f.bind();assert.equal(f.write.disabled,true);assert.equal(f.read.disabled,false);
     await f.ui.begin(f.marker,f.point);f.bind();
@@ -96,6 +122,8 @@ test("report close after popup closes discards late HTML and delegates draining 
     const dialog=f.body.children.at(-1);
     assert.equal(dialog.shown,true);
     f.marker.isPopupOpen=()=>false;
+    assert.equal(dialog.children[0].textContent,"\u00d7");
+    assert.equal(dialog.children[0].getAttribute("aria-label"),"Fechar relat\u00f3rio");
     dialog.children[0].onclick();assert.equal(dialog.removed,true);
     resolve("old report");await pending;
     assert.equal(dialog.children[2].srcdoc,undefined);
@@ -154,6 +182,7 @@ function reportDOM(t,f) {
     const oldParser=global.DOMParser, oldObserver=global.MutationObserver;
     global.DOMParser=class{parseFromString(){return {
         createElement:tag=>new Node(tag),head:{prepend(){}},documentElement:{outerHTML:"<html>report</html>"},
+        querySelector:selector=>selector.includes("data-waypoint-report-form")?{}:null,
     };}};
     global.MutationObserver=class{observe(){}disconnect(){}};
     t.after(()=>{global.DOMParser=oldParser;global.MutationObserver=oldObserver;});
@@ -169,7 +198,7 @@ function reportDOM(t,f) {
 test("HTML report returns to the same map acquisition and preserves close/reopen lifecycle",async(t)=>{
     const f=fixture();f.bind();await f.ui.begin(f.marker,f.point);
     const dom=reportDOM(t,f),mapRead=f.manager.perform;
-    f.manager.perform=async(_id,_url,_options,consume)=>consume({ok:true,text:async()=>"<html>HTML report</html>"});
+    f.manager.perform=async(_id,_url,_options,consume)=>consume({ok:true,status:200,headers:{get:()=>"text/html"},text:async()=>"<html>HTML report</html>"});
     await f.ui.openReport(7,"/signaling/points/7/report/");
     const {dialog,frame}=dom.attach();
     assert.match(frame.srcdoc,/html/);
@@ -194,7 +223,7 @@ test("DOCX form consumes the artifact without ending the map lease",async(t)=>{
     t.mock.method(global,"setTimeout",fn=>{fn();return 1;});
     f.manager.perform=async(id,url,options={},consume)=>{
         requests.push({id,url,method:options.method||"GET"});
-        return consume({ok:true,headers:{get:()=>"application/vnd.openxmlformats-officedocument.wordprocessingml.document"},
+        return consume({ok:true,status:200,headers:{get:()=>options.method === "POST" ? "application/vnd.openxmlformats-officedocument.wordprocessingml.document" : "text/html"},
             text:async()=>"<html>report</html>",blob:async()=>new Blob(["docx"])});
     };
     // The document factory creates the download anchor inside the production handler.
@@ -247,4 +276,296 @@ test("BFCache restoration dismisses a report tied to an ended acquisition and dr
     assert.equal(f.write.disabled,true);
     assert.equal(f.root.children[0].children[1].hidden,false);
     assert.equal(f.calls.filter(call=>call[0]==="acquire").length,1);
+});
+
+
+function draftUI(t) {
+    const f=fixture(),dom=reportDOM(t,f);
+    const draft={pending:true,stops:0,destroyed:false,attached:0,flushes:0,
+        hasPending(){return this.pending;},
+        async flush(){this.flushes++;return false;},
+        stop(){this.stops++;},pause(){},resume(){},
+        destroy(){this.destroyed=true;},attach(){this.attached++;},
+    };
+    f.window.ReportDraft={mount:()=>draft};
+    f.manager.perform=async(_id,_url,_options,consume)=>consume({ok:true,status:200,headers:{get:()=>"text/html"},text:async()=>"<html>report</html>"});
+    return {f,dom,draft,async open(){
+        const perform=f.manager.perform;f.manager.perform=async()=>[{id:7,status:"OK"}];
+        await f.ui.begin(f.marker,f.point);f.manager.perform=perform;
+        await f.ui.openReport(7,"/signaling/points/7/report/");
+        return dom.attach();
+    }};
+}
+test("closing an unsaved report permits cancel; discard requires explicit confirmation",async t=>{
+    const {f,draft,open}=draftUI(t),{dialog}=await open();
+    const close=dialog.children[0].onclick();await Promise.resolve();await Promise.resolve();
+    assert.equal(draft.flushes,1);assert.equal(dialog.removed,undefined);
+    const confirmation=f.body.children.at(-1);assert.notEqual(confirmation,dialog);
+    assert.equal(confirmation.children[0].textContent,"Cancelar");
+    confirmation.children.find(node=>node.textContent==="Cancelar").onclick();await close;
+    assert.equal(dialog.removed,undefined);assert.equal(draft.destroyed,false);
+    const discard=dialog.children[0].onclick();await Promise.resolve();await Promise.resolve();
+    f.body.children.at(-1).children.find(node=>node.textContent==="Confirmar").onclick();await discard;
+    assert.equal(dialog.removed,true);assert.equal(draft.destroyed,true);
+});
+test("successful flush closes the report without a discard dialog",async t=>{
+    const {f,draft,open}=draftUI(t),{dialog}=await open();
+    draft.flush=async()=>{draft.pending=false;return true;};
+    await dialog.children[0].onclick();
+    assert.equal(dialog.removed,true);assert.equal(f.body.children.length,1);
+});
+for (const state of ["lost","closing","acquiring"]) test("reservation "+state+" retains unsaved report for copy",async t=>{
+    const {f,draft,open}=draftUI(t),{dialog}=await open();
+    f.emit({state});assert.ok(draft.stops>0);assert.equal(dialog.removed,undefined);
+    let prevented=false;f.windows.beforeunload({preventDefault(){prevented=true;}});
+    assert.equal(prevented,true);assert.equal(draft.destroyed,false);
+});
+test("switching reservation to another waypoint stops the old form",async t=>{
+    const {f,draft,open}=draftUI(t),{dialog}=await open();
+    f.emit({pointId:8,state:"active"});assert.ok(draft.stops>0);
+    assert.equal(dialog.removed,undefined);
+});
+test("DOCX waits for pending autosave and uses the same report POST",async t=>{
+    const {f,dom,draft,open}=draftUI(t);await open();const order=[];
+    draft.flush=async()=>{order.push("draft");draft.pending=false;};
+    f.manager.perform=async(_id,url,options,consume)=>{
+        order.push(options.method+":"+url);
+        return consume({ok:true,headers:{get:()=>"text/html"},text:async()=>"<html>validation</html>"});
+    };
+    const form={dataset:{},matches:()=>true};
+    await dom.events.submit({target:form,preventDefault(){}});
+    assert.deepEqual(order,["draft","POST:/signaling/points/7/report/"]);
+    dom.attach();assert.equal(draft.attached,1);
+});
+
+
+test("BFCache and remote deletion retain unsaved report instead of destroying it",async t=>{
+    const {f,draft,open}=draftUI(t),{dialog}=await open();
+    f.manager.leave=()=>f.emit({pointId:null,state:"idle"});
+    f.windows.pagehide();await f.windows.pageshow();
+    assert.equal(dialog.removed,undefined);assert.equal(draft.destroyed,false);
+    f.manager.invalidate=()=>f.emit({pointId:null,state:"idle"});
+    f.ui.invalidate(7);
+    assert.equal(dialog.removed,undefined);assert.equal(draft.destroyed,false);
+});
+test("outer navigation cannot silently discard unsaved form",async t=>{
+    const {f,open}=draftUI(t);await open();let prevented=false;
+    const link={target:"",closest:()=>null,getAttribute:()=>"/other/"};
+    f.events.click({target:{closest:()=>link},preventDefault(){prevented=true;},stopImmediatePropagation(){}});
+    assert.equal(prevented,true);assert.equal(f.calls.some(item=>item[0]==="leave"),false);
+});
+
+
+test("a DOCX error page without a form must not replace unsaved local fields",async t=>{
+    const {f,dom,open}=draftUI(t),{frame,dialog}=await open();
+    const original=frame.srcdoc;
+    global.DOMParser=class{parseFromString(){return {querySelector:()=>null};}};
+    f.manager.perform=async(_id,_url,_options,consume)=>consume({ok:true,
+        headers:{get:()=>"text/html"},text:async()=>"<html>filter error</html>"});
+    await dom.events.submit({target:{dataset:{},matches:()=>true},preventDefault(){}});
+    assert.equal(frame.srcdoc,original);assert.match(dialog.children[1].textContent,/textos foram mantidos/);
+});
+test("lost reservation leaves text selectable in read-only fields",async t=>{
+    const {f,open}=draftUI(t),{frame}=await open();const text={readOnly:false,value:"Local"};
+    frame.contentDocument.querySelectorAll=selector=>selector.includes("textarea")?[text]:[];
+    f.emit({state:"lost"});
+    assert.equal(text.readOnly,true);assert.equal(text.disabled,undefined);assert.equal(text.value,"Local");
+});
+
+test("publication busy fences iframe edits, DOCX and navigation without another lease",async t=>{
+    const {f,dom,draft,open}=draftUI(t);draft.pending=false;
+    let bridge;
+    f.window.ReportPublicationFlow={create(){}};
+    f.window.ReportPublicationPreview={mount(options){bridge=options;return {destroy(){}};}};
+    const {dialog,frame}=await open();
+    const submit=new Node("button"),text=new Node("textarea");
+    frame.contentDocument.querySelectorAll=selector=>selector.includes("textarea")?[text]:[submit];
+    bridge.onBusy(true);
+    assert.equal(submit.disabled,true);assert.equal(text.readOnly,true);
+    f.emit({state:"active"});assert.equal(text.readOnly,true);
+    await dialog.children[0].onclick();assert.equal(dialog.removed,undefined);
+    let prevented=false;f.windows.beforeunload({preventDefault(){prevented=true;}});assert.equal(prevented,true);
+    let posts=0;f.manager.perform=async()=>{posts++;};
+    await dom.events.submit({target:{matches:()=>true,dataset:{}},preventDefault(){}});assert.equal(posts,0);
+    bridge.onBusy(false);assert.equal(submit.disabled,false);assert.equal(text.readOnly,false);
+    await dialog.children[0].onclick();assert.equal(dialog.removed,true);
+    assert.equal(f.calls.filter(call=>call[0]==="acquire").length,1);
+});
+
+test("embedded report removes the redundant back link while parent close retains the map lease",async t=>{
+    const {f,draft,open}=draftUI(t);draft.pending=false;
+    const Parser=global.DOMParser,back=new Node("a");
+    global.DOMParser=class extends Parser{parseFromString(...args){const parsed=super.parseFromString(...args);
+        parsed.querySelector=selector=>selector==="[data-report-back]"?back:selector.includes("data-waypoint-report-form")?{}:null;return parsed;}};
+    const {dialog}=await open();
+    assert.equal(back.removed,true);assert.equal(dialog.children.filter(node=>node.tag==="button").length,1);
+    await dialog.children[0].onclick();assert.equal(dialog.removed,true);
+    assert.equal(f.calls.filter(call=>call[0]==="close").length,0);
+});
+
+
+function openingResponse(status,type,body,code) {
+    return {ok:status===200,status,headers:{get:()=>type},text:async()=>body,
+        json:async()=>({code,error:"SECRET_INTERNAL_DETAIL"})};
+}
+function openingParser(t) {
+    const previous=global.DOMParser;
+    global.DOMParser=class {parseFromString(body){return {
+        querySelector:selector=>selector==="[data-report-filter-error]" && body==="stale" ?
+            {textContent:"Os filtros informados pertencem a outra an\u00e1lise."} : null,
+    };}};
+    t.after(()=>{global.DOMParser=previous;});
+}
+for (const [status,type,code,pattern] of [
+    [400,"application/json","invalid_reservation_arguments",/Credenciais/],
+    [428,"application/json","reservation_required",/Reserva/],
+    [403,"application/json","permission_denied",/permiss/],
+    [403,"text/html",null,/permiss/],
+    [409,"application/json","unknown_conflict",/conflito/],
+    [400,"application/json","unknown",/servidor/],
+    [403,"application/json","reservation_credentials_invalid",/reserva/],
+    [409,"application/json","reservation_expired",/reserva/],
+    [404,"text/html",null,/waypoint/],
+    [500,"text/html",null,/servidor/],
+    [200,"application/json",null,/servidor/],
+]) test(`opening ${status}/${code} displays controlled text and retains close lifecycle`,async()=>{
+    const f=fixture();f.bind();await f.ui.begin(f.marker,f.point);
+    const diagnostics=[];f.window.console={warn:(...args)=>diagnostics.push(args)};
+    f.manager.perform=async(id,url,options,consume,policy)=>{
+        assert.equal(policy.consumeErrors,true);
+        return consume(openingResponse(status,type,"SECRET_INTERNAL_DETAIL",code));
+    };
+    await f.ui.openReport(7,"/signaling/points/7/report/?analysis=private-value");
+    const dialog=f.body.children.at(-1);
+    assert.match(dialog.children[1].textContent,pattern);
+    assert.equal(dialog.children[2].hidden,true);assert.equal(dialog.children[2].srcdoc,undefined);
+    assert.doesNotMatch(JSON.stringify(diagnostics),/SECRET|private-value|Token|Interaction/);
+    f.emit({state:"active"});assert.match(dialog.children[1].textContent,pattern);
+    await dialog.children[0].onclick();assert.equal(dialog.removed,true);
+    assert.equal(f.calls.filter(c=>c[0]==="close").length,0);
+    f.ui.end(7);assert.equal(f.calls.filter(c=>c[0]==="close").length,1);
+});
+test("stale analysis offers explicit refresh only, preserves URL and never embeds error HTML",async t=>{
+    openingParser(t);
+    const f=fixture();f.bind();await f.ui.begin(f.marker,f.point);
+    let reloads=0;f.window.location.reload=()=>reloads++;
+    f.manager.perform=async(id,url,options,consume)=>{
+        assert.match(url,/analysis=old&year=2026/);
+        return consume(openingResponse(400,"text/html; charset=utf-8","stale"));
+    };
+    await f.ui.openReport(7,"/signaling/points/7/report/?analysis=old&year=2026");
+    const dialog=f.body.children.at(-1);
+    assert.match(dialog.children[1].textContent,/outra aba/);assert.equal(reloads,0);
+    assert.equal(dialog.children[2].srcdoc,undefined);
+    await dialog.children[3].children[0].onclick();
+    assert.equal(reloads,1);assert.equal(dialog.removed,true);
+});
+test("network failure and closing last owner do not retain a failed panel",async()=>{
+    const f=fixture();f.bind();await f.ui.begin(f.marker,f.point);
+    f.manager.perform=async()=>{throw Object.assign(new Error("SECRET"),{code:"network"});};
+    await f.ui.openReport(7,"/signaling/points/7/report/");
+    const dialog=f.body.children.at(-1);
+    assert.match(dialog.children[1].textContent,/rede/);
+    f.marker.isPopupOpen=()=>false;f.ui.end(7);
+    assert.equal(f.calls.filter(c=>c[0]==="close").length,0);
+    await dialog.children[0].onclick();
+    assert.equal(f.calls.filter(c=>c[0]==="close").length,1);
+});
+test("close stale panel then reopen with corrected analysis succeeds without another lease",async t=>{
+    const f=fixture();f.bind();await f.ui.begin(f.marker,f.point);openingParser(t);
+    f.manager.perform=async(id,url,options,consume)=>consume(openingResponse(400,"text/html","stale"));
+    await f.ui.openReport(7,"/signaling/points/7/report/?analysis=old");
+    await f.body.children.at(-1).children[0].onclick();
+    const dom=reportDOM(t,f);
+    f.manager.perform=async(id,url,options,consume)=>{
+        assert.match(url,/analysis=current/);return consume(openingResponse(200,"text/html","report"));
+    };
+    await f.ui.openReport(7,"/signaling/points/7/report/?analysis=current");
+    const {frame}=dom.attach();assert.match(frame.srcdoc,/html/);
+    assert.equal(f.calls.filter(c=>c[0]==="acquire").length,1);
+});
+
+test("unrecognized error HTML and unexpected successful HTML are never embedded",async t=>{
+    openingParser(t);
+    for (const status of [200,400]) {
+        const f=fixture();f.bind();await f.ui.begin(f.marker,f.point);
+        f.manager.perform=async(id,url,options,consume)=>consume(openingResponse(status,"text/html","<script>SECRET</script>"));
+        await f.ui.openReport(7,"/signaling/points/7/report/");
+        const dialog=f.body.children.at(-1);
+        assert.equal(dialog.children[2].srcdoc,undefined);
+        assert.doesNotMatch(dialog.children[1].textContent,/SECRET|script/);
+        assert.match(dialog.children[1].textContent,/servidor/);
+    }
+});
+test("late failed response cannot recreate a closed report or request recovery",async()=>{
+    const f=fixture();f.bind();await f.ui.begin(f.marker,f.point);
+    let reject;f.manager.perform=()=>new Promise((_,fail)=>reject=fail);
+    const pending=f.ui.openReport(7,"/signaling/points/7/report/");
+    const dialog=f.body.children.at(-1);
+    await dialog.children[0].onclick();
+    reject(Object.assign(new Error("internal"),{code:"report_analysis_stale",status:400}));
+    await pending;
+    assert.equal(dialog.removed,true);assert.equal(dialog.children.length,3);
+    assert.equal(f.calls.filter(c=>c[0]==="close").length,0);
+});
+
+
+const navigationTick=async()=>{for(let n=0;n<12;n++)await Promise.resolve();};
+test("published report consultation waits for release and replaces the parent map",async t=>{
+    const {f,dom,draft,open}=draftUI(t);draft.pending=false;
+    let publication;
+    f.window.ReportPublicationPreview={mount(options){publication=options;return {destroy(){}};}};
+    await open();publication.onBusy(true);
+    let release;f.manager.leave=()=>{f.calls.push(["leave"]);return new Promise(done=>release=done);};
+    const link={target:"_top",hasAttribute:name=>name==="data-publication-report-link",getAttribute:()=>"/signaling/reports/official-id/"};
+    const click=()=>dom.events.click({target:{closest:()=>link},preventDefault(){}});
+    click();assert.equal(f.calls.filter(c=>c[0]==="leave").length,0);
+    publication.onBusy(false);click();click();
+    assert.equal(f.calls.filter(c=>c[0]==="leave").length,1);
+    assert.equal(f.calls.filter(c=>c[0]==="navigate").length,0);
+    release(true);await navigationTick();
+    assert.deepEqual(f.calls.filter(c=>c[0]==="navigate"),[["navigate","http://localhost/signaling/reports/official-id/"]]);
+});
+test("failed release blocks official report navigation and permits explicit recovery",async t=>{
+    const {f,dom,draft,open}=draftUI(t);draft.pending=false;await open();
+    let releases=0;f.manager.leave=async()=>++releases>1;
+    const link={hasAttribute:()=>true,getAttribute:()=>"/signaling/reports/official-id/"};
+    const click=()=>dom.events.click({target:{closest:()=>link},preventDefault(){}});
+    click();await navigationTick();
+    assert.equal(f.calls.some(c=>c[0]==="navigate"),false);
+    assert.match(f.body.children.at(-1).textContent,/libera/);
+    assert.match(f.body.children.find(node=>node.tag==="dialog").children[1].textContent,/libera/);
+    click();await navigationTick();assert.equal(releases,2);
+    assert.equal(f.calls.filter(c=>c[0]==="navigate").length,1);
+});
+test("pending draft is not discarded to consult a published report",async t=>{
+    const {f,dom,open}=draftUI(t);await open();
+    const link={hasAttribute:()=>true,getAttribute:()=>"/signaling/reports/id/"};
+    dom.events.click({target:{closest:()=>link},preventDefault(){}});await navigationTick();
+    assert.equal(f.calls.some(c=>["leave","navigate"].includes(c[0])),false);
+});
+test("map navbar navigation also waits for release; new-tab links do not end original owner",async()=>{
+    const f=fixture();f.bind();await f.ui.begin(f.marker,f.point);
+    let finish;f.manager.leave=()=>new Promise(done=>finish=done);
+    const link={target:"_blank",closest:()=>null,getAttribute:()=>"/signaling/reports/"};
+    f.events.click({target:{closest:()=>link},preventDefault(){throw new Error("must preserve new tab");}});
+    assert.equal(finish,undefined);
+    link.target="";let prevented=false;
+    f.events.click({target:{closest:()=>link},preventDefault(){prevented=true;}});
+    assert.equal(prevented,true);assert.equal(f.calls.some(c=>c[0]==="navigate"),false);
+    finish(true);await navigationTick();assert.equal(f.calls.filter(c=>c[0]==="navigate").length,1);
+});
+
+test("browser Back after official consultation dismisses old report before reacquiring waypoint",async t=>{
+    const {f,dom,draft,open}=draftUI(t);draft.pending=false;const {dialog}=await open();
+    const link={hasAttribute:()=>true,getAttribute:()=>"/signaling/reports/official-id/"};
+    dom.events.click({target:{closest:()=>link},preventDefault(){}});await navigationTick();
+    assert.equal(f.manager.canOperate(7),false);
+    f.windows.pagehide();await f.windows.pageshow();
+    assert.equal(dialog.removed,true);
+    const before=f.calls.filter(c=>c[0]==="acquire").length;
+    f.manager.perform=async()=>[{id:7,status:"OK"}]; // restore the map refresh fixture after report HTML
+    await f.ui.begin(f.marker,f.point);
+    assert.equal(f.calls.filter(c=>c[0]==="acquire").length,before+1);
+    assert.equal(f.manager.canOperate(7),true);
 });
