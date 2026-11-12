@@ -125,6 +125,8 @@ class NginxTemplateTests(unittest.TestCase):
                 self.check_http_nginx_syntax(self.render(**values))
 
     def check_http_nginx_syntax(self, rendered):
+        # nginx -t also binds listeners; use an unprivileged loopback port only here.
+        rendered = rendered.replace("listen 80;", "listen 127.0.0.1:8080;")
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "nginx.conf"
             path.write_text("pid " + directory + "/nginx.pid;\nerror_log stderr;\nevents {}\nhttp {\naccess_log off;\n"
@@ -134,4 +136,3 @@ class NginxTemplateTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
