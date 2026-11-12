@@ -1,0 +1,10 @@
+---
+# Reported production values. Reference only: not an inventory or a deploy playbook.
+# Load explicitly into the existing infrastructure workflow after review.
+nginx_https_enabled: false
+nginx_http_redirect_https: false
+nginx_server_name: "172.28.240.99"
+nginx_static_root: /var/www/analise-sinalizacao/static
+nginx_max_upload_size: 500M
+nginx_forwarded_for_mode: append
+# nginx_candidate_path must be chosen outside the active configuration tree.

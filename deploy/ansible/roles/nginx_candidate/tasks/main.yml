@@ -1,0 +1,31 @@
+---
+- name: Validate candidate variables
+  ansible.builtin.assert:
+    that:
+      - nginx_https_enabled is boolean
+      - nginx_http_redirect_https is boolean
+      - not nginx_http_redirect_https or nginx_https_enabled
+      - nginx_forwarded_for_mode in ['remote_addr', 'append']
+      - nginx_server_name is match('^[_a-zA-Z0-9.-]+$')
+      - nginx_static_root is match('^/[a-zA-Z0-9_./-]+$')
+      - nginx_max_upload_size is match('^[1-9][0-9]*[kKmMgG]$')
+      - nginx_candidate_path is match('^/[a-zA-Z0-9_./-]+$')
+      - "'..' not in nginx_candidate_path.split('/')"
+      - not nginx_candidate_path.startswith('/etc/nginx/')
+    fail_msg: Define verified paths, upload limit and booleans; destination must be a candidate outside /etc/nginx.
+
+- name: Validate TLS inputs only when enabled
+  ansible.builtin.assert:
+    that:
+      - nginx_server_name != '_'
+      - nginx_server_name is match('^[a-zA-Z0-9](?:[a-zA-Z0-9.-]*[a-zA-Z0-9])?$')
+      - nginx_tls_certificate is match('^/[a-zA-Z0-9_./-]+$')
+      - nginx_tls_certificate_key is match('^/[a-zA-Z0-9_./-]+$')
+    fail_msg: HTTPS requires an explicit hostname and absolute certificate/key paths.
+  when: nginx_https_enabled
+
+- name: Render candidate only (no installation or service operation)
+  ansible.builtin.template:
+    src: site.conf.j2
+    dest: "{{ nginx_candidate_path }}"
+    mode: "0600"

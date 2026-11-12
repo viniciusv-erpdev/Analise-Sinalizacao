@@ -16,6 +16,7 @@ from pathlib import Path
 from django.core.exceptions import ImproperlyConfigured
 
 from config.database import database_config
+from config.proxy import proxy_settings
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -44,6 +45,15 @@ ALLOWED_HOSTS = [
 ]
 if not DEBUG and not ALLOWED_HOSTS:
     raise ImproperlyConfigured("DJANGO_ALLOWED_HOSTS is required when DJANGO_DEBUG=False.")
+
+# Disabled by default. Enable trust only with an isolated, header-overwriting proxy.
+_proxy_settings = proxy_settings(os.environ)
+SECURE_PROXY_SSL_HEADER = _proxy_settings["SECURE_PROXY_SSL_HEADER"]
+SESSION_COOKIE_SECURE = _proxy_settings["SESSION_COOKIE_SECURE"]
+CSRF_COOKIE_SECURE = _proxy_settings["CSRF_COOKIE_SECURE"]
+# Redirect is owned by Nginx; HSTS requires a later, separate rollout decision.
+SECURE_SSL_REDIRECT = False
+SECURE_HSTS_SECONDS = 0
 
 
 # Application definition
