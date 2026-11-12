@@ -1,0 +1,13 @@
+---
+nginx_https_enabled: false
+nginx_server_name: "_"
+nginx_tls_certificate: ""
+nginx_tls_certificate_key: ""
+nginx_http_redirect_https: false
+# remote_addr overwrites client input; append preserves the reported production chain.
+nginx_forwarded_for_mode: remote_addr
+# Required from verified environment values; no guessed server paths or limits.
+nginx_static_root: ""
+nginx_max_upload_size: ""
+# Candidate only: must be outside the active Nginx configuration tree.
+nginx_candidate_path: ""

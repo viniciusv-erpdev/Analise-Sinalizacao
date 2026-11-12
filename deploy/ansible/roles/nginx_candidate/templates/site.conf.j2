@@ -1,0 +1,44 @@
+{# Shared locations keep HTTP and HTTPS behavior identical. #}
+{% macro application() %}
+    client_max_body_size {{ nginx_max_upload_size }};
+
+    location ~ /\. {
+        deny all;
+    }
+
+    location /static/ {
+        alias {{ nginx_static_root | regex_replace('/+$', '') }}/;
+        autoindex off;
+    }
+
+    location / {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_set_header Host $http_host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For {{ '$proxy_add_x_forwarded_for' if nginx_forwarded_for_mode == 'append' else '$remote_addr' }};
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+{% endmacro %}
+# Include in the http context. Candidate only; no certificates are managed here.
+server {
+    listen 80;
+    server_name {{ nginx_server_name }};
+{% if nginx_https_enabled and nginx_http_redirect_https %}
+    # Fixed configured host avoids reflecting an untrusted Host header.
+    return 308 https://{{ nginx_server_name }}$request_uri;
+{% else %}
+{{ application() }}
+{% endif %}
+}
+{% if nginx_https_enabled %}
+
+server {
+    listen 443 ssl;
+    server_name {{ nginx_server_name }};
+    ssl_certificate {{ nginx_tls_certificate }};
+    ssl_certificate_key {{ nginx_tls_certificate_key }};
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_session_tickets off;
+{{ application() }}
+}
+{% endif %}

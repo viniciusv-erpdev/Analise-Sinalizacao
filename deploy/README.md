@@ -68,3 +68,9 @@ sudo systemctl reload nginx
 ```
 
 **Não foram executados**: a preparação ocorreu no Windows, sem instalação, execução ou simulação do Nginx.
+
+## Preparação HTTPS opcional
+
+Consulte [HTTPS.md](HTTPS.md) para o template Ansible candidato, variáveis,
+validação, futura ativação em homologação e reversão. Os padrões mantêm HTTP.
+Essa preparação não instala configurações nem altera o deploy controlado.
