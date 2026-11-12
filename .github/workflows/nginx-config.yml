@@ -1,9 +1,9 @@
 name: Nginx configuration preparation
 on:
   push:
-    paths: ['deploy/**', 'config/proxy.py', 'config/settings.py', 'config/test_proxy.py', 'scripts/test_nginx_template.py', '.github/workflows/nginx-config.yml']
+    paths: ['deploy/**', 'config/proxy.py', 'config/settings.py', 'config/test_proxy.py', 'scripts/test_nginx_template.py', 'scripts/test_gunicorn_config.py', '.github/workflows/nginx-config.yml']
   pull_request:
-    paths: ['deploy/**', 'config/proxy.py', 'config/settings.py', 'config/test_proxy.py', 'scripts/test_nginx_template.py', '.github/workflows/nginx-config.yml']
+    paths: ['deploy/**', 'config/proxy.py', 'config/settings.py', 'config/test_proxy.py', 'scripts/test_nginx_template.py', 'scripts/test_gunicorn_config.py', '.github/workflows/nginx-config.yml']
 permissions:
   contents: read
 jobs:
@@ -36,4 +36,4 @@ jobs:
         run: |
           command -v nginx
           command -v ansible-playbook
-          python -m unittest scripts.test_nginx_template -v
+          python -m unittest scripts.test_nginx_template scripts.test_gunicorn_config -v
